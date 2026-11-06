@@ -1,5 +1,6 @@
-import React from 'react';
-import { ArrowDown, ArrowUpRight, Instagram, Linkedin, Youtube, Globe2, Sparkles, Mail, MapPin } from 'lucide-react';
+import React, { useState } from 'react';
+import { ArrowDown, ArrowUpRight, Instagram, Linkedin, Youtube, Globe2, Sparkles, MapPin } from 'lucide-react';
+import { BrandInquiryAssistant } from './BrandInquiryAssistant';
 
 export interface CreatorPortfolioPageProps {
   pageData: Record<string, any>;
@@ -19,6 +20,7 @@ const socialIcon=(platform:string)=>{
 };
 
 export const CreatorPortfolioPage:React.FC<CreatorPortfolioPageProps>=({pageData,handle,preview=false})=>{
+  const [assistantOpen,setAssistantOpen]=useState(false);
   const name=String(pageData.display_name||'Creator');
   const headline=String(pageData.headline||'');
   const bio=String(pageData.bio||'');
@@ -88,8 +90,9 @@ export const CreatorPortfolioPage:React.FC<CreatorPortfolioPageProps>=({pageData
 
       {platforms.length>0&&<section id="connect" className="border-y px-6 py-16 sm:px-10 lg:px-14" style={{borderColor:theme.border,background:theme.surface}}><div className="mx-auto flex max-w-[1180px] flex-col gap-7 md:flex-row md:items-center md:justify-between"><div><p className="font-mono text-[9px] uppercase tracking-[.18em]" style={{color:theme.muted}}>ELSEWHERE</p><h2 className="mt-3 font-display text-3xl font-semibold tracking-[-.05em]">Follow the work.</h2></div><div className="flex flex-wrap gap-2">{platforms.map((p:any)=>{const Icon=socialIcon(String(p.platform));return <a key={p.platform} href={safeLink(String(p.url))||'#'} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-full border px-4 py-3 text-[10px] transition-transform hover:-translate-y-0.5" style={{borderColor:theme.border}}><Icon size={13}/>{p.platform}<ArrowUpRight size={11}/></a>})}</div></div></section>}
 
-      <section id="contact" className="mx-auto max-w-[1180px] px-6 py-24 sm:px-10 lg:px-14"><div className="rounded-[28px] p-8 sm:p-12" style={{background:theme.ink,color:theme.paper}}><div className="grid gap-8 md:grid-cols-[1fr_auto] md:items-end"><div><p className="font-mono text-[9px] uppercase tracking-[.18em]" style={{color:theme.accent}}>THE NEXT PROJECT</p><h2 className="mt-4 max-w-[700px] font-display text-[clamp(2.7rem,6.5vw,5.6rem)] font-semibold leading-[.91] tracking-[-.07em]">Have something<br/>good in mind?</h2><p className="mt-5 max-w-[390px] text-[11px] leading-relaxed opacity-70">Share the basics of your campaign and let’s start a conversation.</p></div><a href="mailto:?subject=Collaboration%20enquiry" className="inline-flex items-center justify-center gap-2 rounded-full px-6 py-4 text-[11px] font-bold" style={{background:theme.accent,color:theme.ink}}>Start an enquiry <Mail size={14}/></a></div></div></section>
+      <section id="contact" className="mx-auto max-w-[1180px] px-6 py-24 sm:px-10 lg:px-14"><div className="rounded-[28px] p-8 sm:p-12" style={{background:theme.ink,color:theme.paper}}><div className="grid gap-8 md:grid-cols-[1fr_auto] md:items-end"><div><p className="font-mono text-[9px] uppercase tracking-[.18em]" style={{color:theme.accent}}>THE NEXT PROJECT</p><h2 className="mt-4 max-w-[700px] font-display text-[clamp(2.7rem,6.5vw,5.6rem)] font-semibold leading-[.91] tracking-[-.07em]">Have something<br/>good in mind?</h2><p className="mt-5 max-w-[390px] text-[11px] leading-relaxed opacity-70">Share the basics of your campaign and let’s start a conversation.</p></div><button type="button" onClick={()=>setAssistantOpen(true)} disabled={preview} className="inline-flex items-center justify-center gap-2 rounded-full px-6 py-4 text-[11px] font-bold transition-transform hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-70" style={{background:theme.accent,color:theme.ink}}>{preview?'Publish to activate enquiries':'Start an enquiry'} <ArrowUpRight size={14}/></button></div></div></section>
     </main>
     <footer className="mx-auto flex max-w-[1180px] flex-col gap-3 border-t px-6 py-7 text-[9px] sm:flex-row sm:items-center sm:justify-between sm:px-10 lg:px-14" style={{borderColor:theme.border,color:theme.muted}}><span>{name} · {handle}</span><span>Made with <a href="/" className="font-semibold underline underline-offset-2">VALLU</a></span></footer>
+    {assistantOpen&&<BrandInquiryAssistant creatorName={name} handle={handle} onClose={()=>setAssistantOpen(false)}/>}
   </div>;
 };
