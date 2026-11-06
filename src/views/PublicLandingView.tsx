@@ -20,7 +20,7 @@ export const PublicLandingView:React.FC<Props>=({onNavigate})=>{
     const load=async()=>{
       if(!supabase||!handle){setNotFound(true);setLoading(false);return;}
       try{
-        const {data,error}=await supabase.from('public_creator_pages').select('handle,published_data,published_theme').eq('handle',handle).eq('status','published').maybeSingle();
+        const {data,error}=await supabase.from('public_creator_pages').select('handle,published_data,published_theme').eq('handle',handle).maybeSingle();
         if(error)throw error;
         if(active){if(data){setPage(data);void trackCreatorEvent(handle,'page_view');}else setNotFound(true);}
       }catch{if(active)setNotFound(true);}
