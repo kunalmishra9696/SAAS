@@ -64,6 +64,15 @@ export const PublicLandingView: React.FC<PublicLandingViewProps> = ({ onNavigate
       else {
         const pageCreator = publicSnapshotToCreator(data);
         setCreator(pageCreator);
+        const visitorKey = 'vallu_public_visitor_v1';
+        let visitorId = sessionStorage.getItem(visitorKey);
+        if (!visitorId) {
+          visitorId = crypto.randomUUID();
+          sessionStorage.setItem(visitorKey, visitorId);
+        }
+        void supabase.functions.invoke('track-creator-event', {
+          body: { handle: pageCreator.handle, event: 'page_view', visitorId },
+        }).catch(() => undefined);
         document.title = pageCreator.name ? `${pageCreator.name} — Creator page` : 'Creator page';
         const description = pageCreator.headline || pageCreator.bio || 'Creator portfolio and brand collaboration enquiries.';
         let meta = document.querySelector('meta[name="description"]') as HTMLMetaElement | null;
