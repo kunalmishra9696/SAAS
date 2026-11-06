@@ -42,7 +42,7 @@ const TextField = ({ label, value, onChange, placeholder, required = false, hint
 </label>;
 
 export const OnboardingView: React.FC<OnboardingViewProps> = ({ onNavigate }) => {
-  const { creator, saveStep, completeOnboarding, isLoading, error: storeError } = useCreatorStore();
+  const { creator, saveStep, completeOnboarding, onboardingStep, isLoading, error: storeError } = useCreatorStore();
   const [step, setStep] = useState(0);
   const [draft, setDraft] = useState<CreatorData>(creator);
   const [saving, setSaving] = useState(false);
@@ -50,6 +50,7 @@ export const OnboardingView: React.FC<OnboardingViewProps> = ({ onNavigate }) =>
   const [platformName, setPlatformName] = useState('Instagram');
 
   React.useEffect(() => setDraft(creator), [creator]);
+  React.useEffect(() => setStep(Math.min(steps.length - 1, onboardingStep)), [onboardingStep]);
 
   const update = (updates: Partial<CreatorData>) => setDraft((current) => ({ ...current, ...updates }));
   const answered = useMemo(() => [
