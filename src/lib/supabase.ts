@@ -1,21 +1,17 @@
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { createClient } from '@supabase/supabase-js';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
-const url = (import.meta.env.VITE_SUPABASE_URL || '').trim();
-const publishableKey = (
-  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
-  import.meta.env.VITE_SUPABASE_ANON_KEY ||
-  ''
-).trim();
+// Only browser-safe project values belong here. Never place the service-role key in Vite code.
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://cecmtolherzfjtsyrhii.supabase.co';
+const supabasePublishableKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_WbN9FWEHocKe11QUj8gOxw_qg4cNwnO';
 
-const isConfigured = Boolean(
-  url.startsWith('https://') &&
-  publishableKey &&
-  !url.includes('your-project-ref') &&
-  !publishableKey.includes('your_')
+const configured = Boolean(
+  supabaseUrl.startsWith('https://') &&
+  supabasePublishableKey.length > 20
 );
 
-export const supabase: SupabaseClient | null = isConfigured
-  ? createClient(url, publishableKey, {
+export const supabase: SupabaseClient | null = configured
+  ? createClient(supabaseUrl, supabasePublishableKey, {
       auth: {
         persistSession: true,
         autoRefreshToken: true,
@@ -24,4 +20,5 @@ export const supabase: SupabaseClient | null = isConfigured
     })
   : null;
 
-export const isSupabaseConfigured = () => Boolean(supabase);
+export const isSupabaseLive = (): boolean => Boolean(supabase);
+export const isSupabaseConfigured = (): boolean => isSupabaseLive();
