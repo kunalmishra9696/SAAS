@@ -1,0 +1,6 @@
+{
+  "name": "VALLU — Creator Collaboration Platform",
+  "description": "VALLU gives creators a professional public landing page and a semi-AI brand inquiry bot that negotiates within creator rules, scores offers, and protects deals.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

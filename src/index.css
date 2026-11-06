@@ -1,0 +1,147 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    --font-display: 'Outfit', 'Plus Jakarta Sans', sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+
+    /* The "Neon Crimson & Deep Slate" Strategy Tokens */
+    --color-canvas: #090D16;
+    --color-structural: #131926;
+    --color-accent: #E11D48;
+    --color-border: #1E293B;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background-color: #090D16;
+    color: #f1f5f9;
+    overflow-x: hidden;
+  }
+
+  h1, h2, h3, h4, .font-display {
+    font-family: var(--font-display);
+    letter-spacing: -0.03em;
+  }
+
+  .font-mono, .tabular-nums {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* Smooth Entrance Zoom & Fade */
+@keyframes smooth-zoom-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.97);
+    filter: blur(8px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0px);
+  }
+}
+
+.animate-smooth-entrance {
+  animation: smooth-zoom-in 0.9s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* 3D Perspective Container */
+.perspective-container {
+  perspective: 1400px;
+}
+
+.preserve-3d {
+  transform-style: preserve-3d;
+}
+
+/* Ambient Neon Crimson & Deep Slate Spotlights */
+.spotlight-red {
+  background: radial-gradient(circle 700px at 50% 15%, rgba(225, 29, 72, 0.14), transparent 70%);
+}
+
+.spotlight-amber {
+  background: radial-gradient(circle 600px at 75% 25%, rgba(244, 63, 94, 0.08), transparent 60%);
+}
+
+/* Structural Glass & Panel Utilities with #131926 and #1E293B */
+.glass-obsidian {
+  background: rgba(19, 25, 38, 0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid #1E293B;
+}
+
+.glass-pill {
+  background: rgba(19, 25, 38, 0.75);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid #1E293B;
+}
+
+/* Safeguard Hover Glow Effect using Crimson & Deep Slate */
+.safeguard-card {
+  background: #131926;
+  border: 1px solid #1E293B;
+  transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 0.4s cubic-bezier(0.16, 1, 0.3, 1),
+              border-color 0.4s cubic-bezier(0.16, 1, 0.3, 1),
+              background 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.safeguard-card:hover {
+  transform: scale(1.04) translateY(-3px);
+  border-color: rgba(225, 29, 72, 0.75);
+  background: radial-gradient(circle at 50% 0%, rgba(225, 29, 72, 0.16), rgba(19, 25, 38, 0.98));
+  box-shadow: 0 0 35px -5px rgba(225, 29, 72, 0.35), 0 20px 40px -15px rgba(9, 13, 22, 0.95);
+}
+
+/* Radar scan animation */
+@keyframes radar-sweep {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-radar {
+  animation: radar-sweep 5s linear infinite;
+  transform-origin: center center;
+}
+
+/* Text Glitch / Fade cycle animation */
+@keyframes text-fade-in {
+  0% {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-text-swap {
+  animation: text-fade-in 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #090D16;
+}
+::-webkit-scrollbar-thumb {
+  background: #1E293B;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #E11D48;
+}
