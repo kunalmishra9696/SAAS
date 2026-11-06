@@ -251,7 +251,7 @@ export const CreatorLandingTemplate: React.FC<CreatorLandingTemplateProps> = ({
           <div className="creator-platform-icon">{platformIcon(platform.name)}</div>
           <div><b>{platform.name}</b>{platform.handle && <span>{platform.handle}</span>}</div>
           {platform.followers && <strong>{platform.followers}<small>FOLLOWERS</small></strong>}
-          {platform.url && <a href={platform.url} target="_blank" rel="noreferrer" aria-label={`Visit ${platform.name}`}><ArrowUpRight size={14} /></a>}
+          {platform.url && <a href={platform.url} target="_blank" rel="noreferrer" onClick={() => void trackEvent("link_click")} aria-label={`Visit ${platform.name}`}><ArrowUpRight size={14} /></a>}
         </article>)}</div>
       </section>}
 
