@@ -152,22 +152,22 @@ export const OnboardingView: React.FC<Props> = ({onNavigate}) => {
       if(!draft.niche.trim())throw new Error('Please add your creator category.');
       if(draft.targetRate&&draft.minimumRate&&Number(draft.minimumRate)>Number(draft.targetRate))throw new Error('Your minimum rate cannot be higher than your target rate.');
 
-      const {error:profileError}=await supabase.from('creator_profiles').upsert({
-        id:loadedUserId,
+      const profileUpdate:Record<string,unknown>={
         display_name:draft.displayName.trim(),
         niche:draft.niche.trim(),
         onboarding_step:nextStep,
-        onboarding_completed:complete,
-      },{onConflict:'id'});
+      };
+      if(complete)profileUpdate.onboarding_completed=true;
+      const {error:profileError}=await supabase.from('creator_profiles').update(profileUpdate).eq('id',loadedUserId);
       if(profileError)throw profileError;
 
-      const {error:pageError}=await supabase.from('creator_pages').upsert({
+      const pagePayload={
         creator_id:loadedUserId,
         handle:cleanHandle,
-        status:'draft',
         page_data:publicPageData,
         theme:{visual_style:draft.visualStyle,writing_tone:draft.writingTone},
-      },{onConflict:'creator_id'});
+      };
+      const {error:pageError}=await supabase.from('creator_pages').upsert(pagePayload,{onConflict:'creator_id'});
       if(pageError)throw pageError;
 
       const {error:settingsError}=await supabase.from('creator_settings').upsert({
