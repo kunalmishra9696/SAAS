@@ -184,6 +184,7 @@ export const CreatorLandingTemplate: React.FC<CreatorLandingTemplateProps> = ({
   const beginInquiry = async () => {
     if (started) return;
     setStarted(true);
+    setMessages((current) => [...current, { sender: 'assistant', body: questions[0].prompt }]);
     await trackEvent('inquiry_start');
   };
 
