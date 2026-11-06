@@ -1,250 +1,207 @@
 import React, { useState } from 'react';
 import { PageRoute } from '../types';
-import { ArrowRight, HelpCircle, Eye, EyeOff, ShieldCheck, Check, Sparkles } from 'lucide-react';
+import { supabase } from '../lib/supabase';
+import { ArrowLeft, ArrowRight, Eye, EyeOff, KeyRound, LoaderCircle, ShieldCheck } from 'lucide-react';
 
-interface AuthViewProps {
-  initialMode?: 'signup' | 'login';
-  onNavigate: (route: PageRoute) => void;
-}
+interface AuthViewProps { initialMode?: 'signup' | 'login'; onNavigate: (route: PageRoute) => void; }
 
 export const AuthView: React.FC<AuthViewProps> = ({ initialMode = 'signup', onNavigate }) => {
   const [mode, setMode] = useState<'signup' | 'login'>(initialMode);
+  const [displayName, setDisplayName] = useState('');
+  const [handle, setHandle] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [handle, setHandle] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [showForgotModal, setShowForgotModal] = useState(false);
-  const [forgotEmail, setForgotEmail] = useState('');
-  const [forgotSent, setForgotSent] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [forgotMode, setForgotMode] = useState(false);
 
-  const handleContinue = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    setIsLoading(true);
+  const ensureCreatorRows = async (user: { id: string; email?: string; user_metadata?: Record<string, unknown> }) => {
+    if (!supabase) throw new Error('The authentication service is not configured. Add the Supabase URL and publishable key before continuing.');
+    const metadata = user.user_metadata || {};
+    const name = String(metadata.display_name || displayName || email.split('@')[0] || 'Creator').trim();
+    const rawHandle = String(metadata.handle || handle || name.toLowerCase().replace(/[^a-z0-9]+/g, '-')).toLowerCase();
+    const cleanHandle = rawHandle.replace(/[^a-z0-9_-]/g, '').slice(0, 30);
 
-    // Smooth simulated transition into onboarding
-    setTimeout(() => {
-      setIsLoading(false);
-      onNavigate('onboarding');
-    }, 450);
+    const { error: profileError } = await supabase.from('creator_profiles').upsert({
+      id: user.id,
+      display_name: name,
+      email: user.email || email,
+      onboarding_completed: false,
+    }, { onConflict: 'id' });
+    if (profileError) throw profileError;
+
+    const { error: settingsError } = await supabase.from('creator_settings').upsert({
+      creator_id: user.id,
+      currency: 'INR',
+      target_rate: 0,
+      minimum_rate: 0,
+      negotiation_counter_limit: 2,
+      decision_window_days: 14,
+    }, { onConflict: 'creator_id' });
+    if (settingsError) throw settingsError;
+
+    if (cleanHandle.length >= 3) {
+      const { error: pageError } = await supabase.from('creator_pages').upsert({
+        creator_id: user.id,
+        handle: cleanHandle,
+        status: 'draft',
+        page_data: { display_name: name },
+      }, { onConflict: 'creator_id' });
+      if (pageError) throw pageError;
+    }
   };
 
-  const handleForgotSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!forgotEmail) return;
-    setForgotSent(true);
-    setTimeout(() => {
-      setShowForgotModal(false);
-      setForgotSent(false);
-      setForgotEmail('');
-    }, 2000);
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setError('');
+    setNotice('');
+    if (!supabase) {
+      setError('Supabase is not configured in this build. The app needs its public project URL and publishable key.');
+      return;
+    }
+    if (mode === 'signup' && !/^[a-z0-9][a-z0-9_-]{2,29}$/.test(handle)) {
+      setError('Choose a handle with 3–30 characters. Use letters, numbers, hyphens or underscores.');
+      return;
+    }
+    if (password.length < 8) {
+      setError('Use a password with at least 8 characters.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      if (mode === 'signup') {
+        const { data, error: signUpError } = await supabase.auth.signUp({
+          email: email.trim().toLowerCase(),
+          password,
+          options: {
+            data: { display_name: displayName.trim(), handle: handle.trim().toLowerCase() },
+            emailRedirectTo: `${window.location.origin}/onboarding`,
+          },
+        });
+        if (signUpError) throw signUpError;
+        if (data.user && data.session) {
+          await ensureCreatorRows(data.user);
+          onNavigate('onboarding');
+          return;
+        }
+        setNotice('Your account request is ready. Check your email to confirm your address, then log in to continue.');
+      } else {
+        const { data, error: signInError } = await supabase.auth.signInWithPassword({
+          email: email.trim().toLowerCase(),
+          password,
+        });
+        if (signInError) throw signInError;
+        if (!data.user) throw new Error('We could not confirm your account. Please try again.');
+        await ensureCreatorRows(data.user);
+        const { data: profile, error: profileLookupError } = await supabase
+          .from('creator_profiles')
+          .select('onboarding_completed')
+          .eq('id', data.user.id)
+          .maybeSingle();
+        if (profileLookupError) throw profileLookupError;
+        onNavigate(profile?.onboarding_completed ? 'dashboard' : 'onboarding');
+        return;
+      }
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : 'Something went wrong. Please try again.';
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleReset = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setError('');
+    setNotice('');
+    if (!supabase) {
+      setError('The authentication service is not configured yet.');
+      return;
+    }
+    setLoading(true);
+    try {
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
+        redirectTo: `${window.location.origin}/login?recovery=1`,
+      });
+      if (resetError) throw resetError;
+      setNotice('If an account exists for that email, Supabase will send a password reset link.');
+      setForgotMode(false);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'We could not request a reset link.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const switchMode = (next: 'signup' | 'login') => {
+    setMode(next);
+    setForgotMode(false);
+    setError('');
+    setNotice('');
   };
 
   return (
-    <div className="pt-24 sm:pt-28 pb-20 px-4 sm:px-6 min-h-[85vh] flex items-center justify-center relative overflow-hidden">
-      {/* Background ambient lighting */}
-      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-96 h-96 bg-[#E11D48]/10 rounded-full blur-[120px] pointer-events-none" />
-
-      <div className="w-full max-w-md relative z-10">
-        {/* Card Container in Deep Slate #131926 with #1E293B Border */}
-        <div className="bg-[#131926] border border-[#1E293B] rounded-3xl p-6 sm:p-8 shadow-[0_24px_60px_-15px_rgba(9,13,22,0.95)]">
-          {/* Header Branding & Subtitle */}
-          <div className="text-center mb-6">
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#090D16] border border-[#1E293B] text-xs font-mono text-[#94A3B8] mb-3">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#E11D48] animate-pulse" />
-              <span>VALLU CREATOR ACCESS</span>
+    <main className="relative flex min-h-[calc(100vh-76px)] items-center justify-center overflow-hidden px-4 pb-20 pt-28 sm:px-6">
+      <div className="absolute inset-0 pointer-events-none" style={{ background: 'radial-gradient(ellipse at 50% 22%, rgba(240,68,62,.13), transparent 42%), radial-gradient(ellipse at 82% 78%, rgba(255,150,63,.06), transparent 30%)' }}/>
+      <div className="relative z-10 grid w-full max-w-[990px] overflow-hidden rounded-[28px] border border-white/[0.10] bg-[#141519] shadow-[0_35px_110px_rgba(0,0,0,.48)] lg:grid-cols-[.93fr_1.07fr]">
+        <aside className="relative hidden min-h-[640px] flex-col justify-between overflow-hidden border-r border-white/[0.08] bg-[#101115] p-9 lg:flex">
+          <div className="absolute -left-24 top-24 h-72 w-72 rounded-full bg-[#F0443E]/[0.16] blur-[100px]"/>
+          <div className="relative z-10 flex items-center gap-2.5"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#F0443E] font-display text-sm font-bold">V</span><span className="font-display text-lg font-semibold">VALLU<span className="text-[#F0443E]">.</span></span></div>
+          <div className="relative z-10">
+            <span className="site-eyebrow">A more considered way to collaborate</span>
+            <h1 className="mt-6 font-display text-[58px] font-semibold leading-[.94] tracking-[-.07em]">Your work.<br/>Your terms.<br/><span className="text-[#F0443E]">Your call.</span></h1>
+            <div className="mt-10 max-w-[310px] space-y-4 border-l border-[#F0443E]/50 pl-5">
+              <p className="text-[12px] leading-relaxed text-[#C8C7C6]">A professional creator page, a guided brand assistant and a private place to review every proposal.</p>
+              <div className="flex items-center gap-2 text-[9px] font-mono uppercase tracking-[.13em] text-[#83848B]"><ShieldCheck size={13} className="text-[#FF963F]"/> The creator stays in control</div>
             </div>
-            <h1 className="font-display font-black text-2xl sm:text-3xl text-[#F1F5F9] uppercase tracking-tight">
-              {mode === 'signup' ? 'Claim Your Bio Link' : 'Welcome Back'}
-            </h1>
-            <p className="text-xs sm:text-sm text-[#94A3B8] mt-1.5 max-w-xs mx-auto">
-              {mode === 'signup'
-                ? 'Join autonomous creators filtering brand deals with zero commission.'
-                : 'Access your private deal inbox, rate shields, and live bio link.'}
-            </p>
           </div>
+          <div className="relative z-10 flex justify-between text-[9px] font-mono uppercase tracking-[.15em] text-[#5F6066]"><span>VALLU / MEMBER ACCESS</span><span>01 — PRIVATE</span></div>
+          <div className="absolute -bottom-28 -right-20 h-[330px] w-[330px] rounded-full border border-white/[0.08]"/><div className="absolute -bottom-16 -right-8 h-[230px] w-[230px] rounded-full border border-[#F0443E]/20"/>
+        </aside>
 
-          {/* Smooth Toggle Switch: [ Sign Up | Log In ] */}
-          <div className="p-1 bg-[#090D16] border border-[#1E293B] rounded-2xl flex items-center mb-6 relative">
-            <button
-              type="button"
-              onClick={() => setMode('signup')}
-              className={`flex-1 py-2 rounded-xl text-xs font-semibold transition-all duration-300 relative z-10 flex items-center justify-center gap-1.5 ${
-                mode === 'signup'
-                  ? 'bg-[#E11D48] text-white shadow-[0_2px_12px_rgba(225,29,72,0.4)]'
-                  : 'text-[#94A3B8] hover:text-[#F1F5F9]'
-              }`}
-            >
-              <span>Sign Up</span>
-              {mode === 'signup' && <Sparkles className="w-3 h-3 text-rose-200" />}
-            </button>
+        <section className="p-6 sm:p-10 lg:p-12">
+          <button onClick={() => onNavigate('home')} className="mb-10 inline-flex items-center gap-2 text-[10px] text-[#8D8E95] transition-colors hover:text-white"><ArrowLeft size={13}/> Back to VALLU</button>
 
-            <button
-              type="button"
-              onClick={() => setMode('login')}
-              className={`flex-1 py-2 rounded-xl text-xs font-semibold transition-all duration-300 relative z-10 flex items-center justify-center gap-1.5 ${
-                mode === 'login'
-                  ? 'bg-[#E11D48] text-white shadow-[0_2px_12px_rgba(225,29,72,0.4)]'
-                  : 'text-[#94A3B8] hover:text-[#F1F5F9]'
-              }`}
-            >
-              <span>Log In</span>
-              {mode === 'login' && <Check className="w-3 h-3 text-white" />}
-            </button>
-          </div>
+          {forgotMode ? <>
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-[#F0443E]/20 bg-[#F0443E]/[0.08] text-[#F0443E]"><KeyRound size={18}/></div>
+            <h2 className="mt-6 font-display text-3xl font-semibold tracking-[-.05em]">Reset your password.</h2>
+            <p className="mt-2 max-w-[340px] text-[11px] leading-relaxed text-[#92939A]">We’ll send a secure reset link to the email associated with your account.</p>
+            <form onSubmit={handleReset} className="mt-8 space-y-4">
+              <label className="block text-[10px] font-medium text-[#B8B8BC]">Email address<input className="auth-field mt-2" type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com" required autoComplete="email"/></label>
+              <button disabled={loading} className="site-button site-button-primary w-full">{loading?<LoaderCircle size={15} className="animate-spin"/>:'Send reset link'} <ArrowRight size={14}/></button>
+              <button type="button" onClick={()=>{setForgotMode(false);setError('');setNotice('');}} className="w-full py-2 text-[10px] text-[#898A90] hover:text-white">Back to sign in</button>
+            </form>
+          </> : <>
+            <div className="site-eyebrow">Creator workspace access</div>
+            <h2 className="mt-5 font-display text-[clamp(2rem,4vw,2.8rem)] font-semibold tracking-[-.065em]">{mode==='signup'?'Start with your link.':'Welcome back.'}</h2>
+            <p className="mt-2 max-w-[360px] text-[11px] leading-relaxed text-[#92939A]">{mode==='signup'?'Create your account. Your page and workspace come next.':'Sign in to manage your page, enquiries and deals.'}</p>
 
-          {/* Form Content with Smooth Transitions */}
-          <form onSubmit={handleContinue} className="space-y-4">
-            {mode === 'signup' && (
-              <div className="space-y-1 animate-in fade-in duration-300">
-                <label className="block text-[11px] font-mono text-[#94A3B8] uppercase tracking-wider">
-                  Reserve Bio Link
-                </label>
-                <div className="flex items-center bg-[#090D16] border border-[#1E293B] rounded-xl px-3 py-2.5 focus-within:border-[#E11D48] transition-colors">
-                  <span className="text-xs font-mono text-[#94A3B8] select-none">vallu.bio/@</span>
-                  <input
-                    type="text"
-                    value={handle}
-                    onChange={(e) => setHandle(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ''))}
-                    placeholder="yourhandle"
-                    required={mode === 'signup'}
-                    className="flex-1 bg-transparent border-none text-xs text-white placeholder-slate-600 focus:outline-none px-1 font-mono"
-                  />
-                  <span className="text-[10px] text-emerald-400 font-mono bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-900/60">
-                    Free
-                  </span>
-                </div>
-              </div>
-            )}
-
-            <div className="space-y-1">
-              <label className="block text-[11px] font-mono text-[#94A3B8] uppercase tracking-wider">
-                Email Address
-              </label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="creator@example.com"
-                required
-                className="w-full bg-[#090D16] border border-[#1E293B] rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-[#E11D48] transition-colors"
-              />
+            <div className="auth-switch mt-8">
+              <span className={`auth-switch-indicator ${mode==='login'?'is-login':''}`}/>
+              <button type="button" onClick={()=>switchMode('signup')} className={`relative z-10 rounded-full py-2.5 text-[11px] font-semibold transition-colors ${mode==='signup'?'text-white':'text-[#85868C]'}`}>Create account</button>
+              <button type="button" onClick={()=>switchMode('login')} className={`relative z-10 rounded-full py-2.5 text-[11px] font-semibold transition-colors ${mode==='login'?'text-white':'text-[#85868C]'}`}>Log in</button>
             </div>
 
-            <div className="space-y-1">
-              <label className="block text-[11px] font-mono text-[#94A3B8] uppercase tracking-wider">
-                Password
-              </label>
-              <div className="relative">
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••••••"
-                  required
-                  className="w-full bg-[#090D16] border border-[#1E293B] rounded-xl px-3.5 py-2.5 pr-10 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-[#E11D48] transition-colors"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#94A3B8] hover:text-white transition-colors"
-                >
-                  {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                </button>
-              </div>
-            </div>
-
-            {/* Bottom Row as specified: Question button on left, Continue on right */}
-            <div className="pt-4 flex items-center justify-between gap-3 border-t border-[#1E293B]/70 mt-6">
-              {/* Question button on left (Forgot Password) */}
-              <button
-                type="button"
-                onClick={() => setShowForgotModal(true)}
-                className="w-10 h-10 rounded-xl bg-[#090D16] border border-[#1E293B] hover:border-[#E11D48]/50 hover:bg-[#1E293B]/60 text-[#94A3B8] hover:text-white flex items-center justify-center transition-all group"
-                title="Forgot password?"
-                aria-label="Forgot password?"
-              >
-                <HelpCircle className="w-4 h-4 text-[#94A3B8] group-hover:text-[#E11D48] transition-colors" />
-              </button>
-
-              {/* Continue button on right */}
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="flex-1 py-3 px-6 rounded-xl bg-gradient-to-r from-[#E11D48] to-rose-600 hover:from-rose-600 hover:to-rose-500 text-white font-bold text-xs tracking-wider uppercase transition-all shadow-[0_4px_16px_rgba(225,29,72,0.4)] hover:shadow-[0_4px_22px_rgba(225,29,72,0.6)] active:scale-98 flex items-center justify-center gap-2 group"
-              >
-                {isLoading ? (
-                  <>
-                    <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    <span>Processing...</span>
-                  </>
-                ) : (
-                  <>
-                    <span>{mode === 'signup' ? 'Create Account & Continue' : 'Continue to Onboarding'}</span>
-                    <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-                  </>
-                )}
-              </button>
-            </div>
-          </form>
-
-          {/* Value Micro-Pill */}
-          <div className="mt-6 pt-4 border-t border-[#1E293B]/60 flex items-center justify-center gap-2 text-[11px] text-[#94A3B8]">
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-            <span>0% Commission · 100% Floor Privacy Guaranteed</span>
-          </div>
-        </div>
+            <form key={mode} onSubmit={handleSubmit} className="mt-7 space-y-4">
+              {mode==='signup' && <>
+                <label className="block text-[10px] font-medium text-[#B8B8BC]">Your name<input className="auth-field mt-2" value={displayName} onChange={e=>setDisplayName(e.target.value)} placeholder="How should we call you?" required autoComplete="name"/></label>
+                <label className="block text-[10px] font-medium text-[#B8B8BC]">Your creator link<div className="mt-2 flex items-center rounded-xl border border-[#36373D] bg-[#0D0E11] focus-within:border-[#F0443E]/80"><span className="pl-3.5 text-[11px] text-[#777980]">/c/</span><input className="min-w-0 flex-1 bg-transparent px-2 py-[13px] text-[13px] text-white outline-none" value={handle} onChange={e=>setHandle(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g,''))} placeholder="yourname" required minLength={3} maxLength={30} autoComplete="username"/></div><span className="mt-1.5 block text-[9px] text-[#6F7076]">3–30 characters · letters, numbers, - and _</span></label>
+              </>}
+              <label className="block text-[10px] font-medium text-[#B8B8BC]">Email address<input className="auth-field mt-2" type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com" required autoComplete="email"/></label>
+              <label className="block text-[10px] font-medium text-[#B8B8BC]">Password<div className="relative mt-2"><input className="auth-field pr-12" type={showPassword?'text':'password'} value={password} onChange={e=>setPassword(e.target.value)} placeholder="At least 8 characters" required minLength={8} autoComplete={mode==='signup'?'new-password':'current-password'}/><button type="button" onClick={()=>setShowPassword(!showPassword)} aria-label={showPassword?'Hide password':'Show password'} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#797A81] hover:text-white">{showPassword?<EyeOff size={15}/>:<Eye size={15}/>}</button></div></label>
+              {mode==='login' && <div className="flex justify-end"><button type="button" onClick={()=>{setForgotMode(true);setError('');setNotice('');}} className="text-[10px] text-[#FF963F] hover:text-white">Forgot password?</button></div>}
+              {error && <div role="alert" className="rounded-xl border border-[#F0443E]/25 bg-[#F0443E]/[0.08] px-3.5 py-3 text-[10px] leading-relaxed text-[#FF9B95]">{error}</div>}
+              {notice && <div role="status" className="rounded-xl border border-emerald-400/20 bg-emerald-400/[0.07] px-3.5 py-3 text-[10px] leading-relaxed text-emerald-200">{notice}</div>}
+              <button type="submit" disabled={loading} className="site-button site-button-primary mt-2 w-full disabled:opacity-60">{loading?<><LoaderCircle size={15} className="animate-spin"/> Working…</>:<>{mode==='signup'?'Create account':'Log in'} <ArrowRight size={14}/></>}</button>
+            </form>
+            <p className="mt-6 text-center text-[9px] leading-relaxed text-[#73747A]">By continuing, you agree to our <button type="button" onClick={()=>onNavigate('legal')} className="text-[#B8B8BC] underline underline-offset-2">Terms</button> and <button type="button" onClick={()=>onNavigate('legal')} className="text-[#B8B8BC] underline underline-offset-2">Privacy Policy</button>.</p>
+            <div className="mt-8 flex items-center justify-center gap-2 border-t border-white/[0.07] pt-5 text-[9px] text-[#6F7076]"><ShieldCheck size={13} className="text-[#FF963F]"/> Your commercial rules remain private.</div>
+          </>}
+        </section>
       </div>
-
-      {/* Forgot Password Modal */}
-      {showForgotModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-[#131926] border border-[#1E293B] rounded-3xl p-6 sm:p-7 max-w-sm w-full shadow-2xl animate-in zoom-in-95 duration-200">
-            <div className="w-10 h-10 rounded-2xl bg-[#090D16] border border-[#1E293B] flex items-center justify-center text-[#E11D48] mb-3">
-              <HelpCircle className="w-5 h-5" />
-            </div>
-
-            <h3 className="text-base font-bold text-white mb-1">Reset Your Password</h3>
-            <p className="text-xs text-[#94A3B8] mb-4">
-              Enter your account email and we'll send a secure password reset link.
-            </p>
-
-            {forgotSent ? (
-              <div className="bg-emerald-950/30 border border-emerald-900/60 rounded-xl p-3 text-xs text-emerald-300 flex items-center gap-2 mb-4">
-                <Check className="w-4 h-4 text-emerald-400" />
-                <span>Reset link transmitted to your inbox!</span>
-              </div>
-            ) : (
-              <form onSubmit={handleForgotSubmit} className="space-y-3">
-                <input
-                  type="email"
-                  value={forgotEmail}
-                  onChange={(e) => setForgotEmail(e.target.value)}
-                  placeholder="creator@example.com"
-                  required
-                  className="w-full bg-[#090D16] border border-[#1E293B] rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-[#E11D48]"
-                />
-
-                <div className="flex gap-2 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowForgotModal(false)}
-                    className="flex-1 py-2 text-xs text-[#94A3B8] hover:text-white rounded-xl hover:bg-[#1E293B] transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="flex-1 py-2 text-xs font-bold text-white bg-[#E11D48] hover:bg-rose-600 rounded-xl transition-colors shadow-md"
-                  >
-                    Send Link
-                  </button>
-                </div>
-              </form>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
+    </main>
   );
 };
