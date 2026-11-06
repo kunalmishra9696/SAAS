@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { PageRoute } from '../types';
 import { supabase } from '../lib/supabase';
 import { CreatorPortfolioPage } from '../components/CreatorPortfolioPage';
+import { trackCreatorEvent } from '../lib/analytics';
 import { LoaderCircle, Search, ArrowLeft } from 'lucide-react';
 
 interface Props { onNavigate:(route:PageRoute)=>void; }
@@ -21,7 +22,7 @@ export const PublicLandingView:React.FC<Props>=({onNavigate})=>{
       try{
         const {data,error}=await supabase.from('creator_pages').select('handle,page_data,theme').eq('handle',handle).eq('status','published').maybeSingle();
         if(error)throw error;
-        if(active){if(data)setPage(data);else setNotFound(true);}
+        if(active){if(data){setPage(data);void trackCreatorEvent(handle,'page_view');}else setNotFound(true);}
       }catch{if(active)setNotFound(true);}
       finally{if(active)setLoading(false);}
     };
