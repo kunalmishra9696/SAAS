@@ -6,6 +6,7 @@ export interface CreatorData {
   handle: string;
   headline: string;
   bio: string;
+  niche: string;
   location: string;
   avatarUrl: string;
   platforms: { name: string; handle: string; followers: string; url?: string }[];
@@ -49,6 +50,7 @@ export const EMPTY_CREATOR_DATA: CreatorData = {
   handle: '',
   headline: '',
   bio: '',
+  niche: '',
   location: '',
   avatarUrl: '',
   platforms: [],
@@ -89,6 +91,7 @@ function fromRows(profile: any, page: PageRow | null, settings: any): CreatorDat
     handle: str(page?.handle || data.handle),
     headline: str(data.headline),
     bio: str(data.bio),
+    niche: str(profile?.niche),
     location: str(data.location),
     avatarUrl: str(profile?.avatar_url || data.avatar_url),
     platforms: Array.isArray(data.platforms) ? data.platforms.filter((item: any) => item && typeof item === 'object').map((item: any) => ({
