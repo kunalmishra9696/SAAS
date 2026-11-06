@@ -1,542 +1,209 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { PageRoute } from '../types';
-import { useCreatorStore, InboundDeal } from '../store/creatorStore';
+import { supabase } from '../lib/supabase';
 import {
-  DollarSign,
-  TrendingUp,
-  ShieldCheck,
-  CheckCircle2,
-  Clock,
-  AlertTriangle,
-  ArrowRight,
-  ExternalLink,
-  Eye,
-  XCircle,
-  FileText,
-  Sliders,
-  Globe,
-  Plus,
-  Share2,
-  Check,
+  Activity, ArrowDownRight, ArrowUpRight, BarChart3, Check, CheckCircle2,
+  Clock3, Copy, ExternalLink, Eye, FileText, Globe, Inbox, LoaderCircle,
+  LockKeyhole, LogOut, MessageCircle, MoreHorizontal, Pause, RefreshCw,
+  ShieldCheck, Sparkles, TrendingUp, X, XCircle
 } from 'lucide-react';
 
-interface DashboardViewProps {
-  onNavigate: (route: PageRoute) => void;
-}
+interface Props { onNavigate:(route:PageRoute)=>void; }
+type Inquiry=Record<string,any>;
+type Deal=Record<string,any>;
+type Tab='visible'|'hidden'|'unfinished'|'on_hold'|'accepted'|'declined';
 
-export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
-  const {
-    creator,
-    deals,
-    updateDealStatus,
-    publishLandingPage,
-    saveDraftLandingPage,
-    updateCreator,
-    addProposal,
-  } = useCreatorStore();
+const tabs:{id:Tab;label:string}[]=[
+  {id:'visible',label:'Visible'}, {id:'hidden',label:'Hidden'}, {id:'unfinished',label:'Unfinished'},
+  {id:'on_hold',label:'On hold'}, {id:'accepted',label:'Accepted'}, {id:'declined',label:'Declined'}
+];
+const money=(amount:number,currency:string)=>new Intl.NumberFormat('en-IN',{style:'currency',currency:currency||'INR',maximumFractionDigits:0}).format(Number(amount)||0);
+const timeLeft=(date:string|null)=>{
+  if(!date)return 'No deadline';
+  const diff=new Date(date).getTime()-Date.now();
+  if(diff<=0)return 'Expired';
+  const days=Math.floor(diff/86400000);
+  const hours=Math.floor((diff%86400000)/3600000);
+  return days>0?`${days}d ${hours}h left`:`${hours}h left`;
+};
 
-  const [activeTab, setActiveTab] = useState<'visible' | 'on_hold' | 'accepted' | 'declined'>('visible');
-  const [selectedDeal, setSelectedDeal] = useState<InboundDeal | null>(null);
-  const [isEditingRates, setIsEditingRates] = useState(false);
-  const [tempTarget, setTempTarget] = useState(creator.startingRate);
-  const [tempFloor, setTempFloor] = useState(creator.floorRate);
-  const [copiedLink, setCopiedLink] = useState(false);
+export const DashboardView:React.FC<Props>=({onNavigate})=>{
+  const [userId,setUserId]=useState('');
+  const [profile,setProfile]=useState<any>(null);
+  const [page,setPage]=useState<any>(null);
+  const [inquiries,setInquiries]=useState<Inquiry[]>([]);
+  const [deals,setDeals]=useState<Deal[]>([]);
+  const [analytics,setAnalytics]=useState<any[]>([]);
+  const [tab,setTab]=useState<Tab>('visible');
+  const [selected,setSelected]=useState<Inquiry|null>(null);
+  const [transcript,setTranscript]=useState<any[]>([]);
+  const [loading,setLoading]=useState(true);
+  const [actionLoading,setActionLoading]=useState(false);
+  const [error,setError]=useState('');
+  const [copied,setCopied]=useState(false);
+  const [currency,setCurrency]=useState('INR');
+  const [target,setTarget]=useState('');
+  const [minimum,setMinimum]=useState('');
+  const [savingSettings,setSavingSettings]=useState(false);
 
-  // Dynamic Pipeline Metric Calculations
-  const visibleDeals = deals.filter((d) => d.status === 'visible');
-  const onHoldDeals = deals.filter((d) => d.status === 'on_hold');
-  const acceptedDeals = deals.filter((d) => d.status === 'accepted');
-  const declinedDeals = deals.filter((d) => d.status === 'declined');
+  const load=useCallback(async()=>{
+    if(!supabase){setError('Supabase is not configured.');setLoading(false);return;}
+    setError('');
+    const {data:{user},error:authError}=await supabase.auth.getUser();
+    if(authError)throw authError;
+    if(!user){onNavigate('login');return;}
+    setUserId(user.id);
+    const [profileRes,pageRes,inquiryRes,dealRes,analyticsRes,settingsRes]=await Promise.all([
+      supabase.from('creator_profiles').select('*').eq('id',user.id).maybeSingle(),
+      supabase.from('creator_pages').select('*').eq('creator_id',user.id).maybeSingle(),
+      supabase.from('brand_inquiries').select('*').eq('creator_id',user.id).order('created_at',{ascending:false}),
+      supabase.from('creator_deals').select('*').eq('creator_id',user.id).order('created_at',{ascending:false}),
+      supabase.from('analytics_daily').select('*').eq('creator_id',user.id).order('day',{ascending:true}).limit(30),
+      supabase.from('creator_settings').select('*').eq('creator_id',user.id).maybeSingle(),
+    ]);
+    for(const result of [profileRes,pageRes,inquiryRes,dealRes,analyticsRes,settingsRes])if(result.error)throw result.error;
+    if(!profileRes.data?.onboarding_completed||!pageRes.data){onNavigate('onboarding');return;}
+    setProfile(profileRes.data);setPage(pageRes.data);setInquiries(inquiryRes.data||[]);setDeals(dealRes.data||[]);setAnalytics(analyticsRes.data||[]);
+    setCurrency(settingsRes.data?.currency||'INR');setTarget(settingsRes.data?.target_rate?String(settingsRes.data.target_rate):'');setMinimum(settingsRes.data?.minimum_rate?String(settingsRes.data.minimum_rate):'');
+  },[onNavigate]);
 
-  const activePipelineValue = visibleDeals.reduce((sum, d) => sum + d.offeredBudget, 0);
-  const acceptedEarningsValue = acceptedDeals.reduce((sum, d) => sum + d.offeredBudget, 0);
+  useEffect(()=>{
+    let active=true;
+    load().catch(e=>{if(active)setError(e instanceof Error?e.message:'Could not load your workspace.');}).finally(()=>{if(active)setLoading(false);});
+    return()=>{active=false;};
+  },[load]);
 
-  const avgDealValue = deals.length > 0
-    ? Math.round(deals.reduce((sum, d) => sum + d.offeredBudget, 0) / deals.length)
-    : creator.startingRate;
+  const counts=useMemo(()=>tabs.reduce((acc,t)=>({...acc,[t.id]:inquiries.filter(i=>i.status===t.id).length}),{} as Record<Tab,number>),[inquiries]);
+  const visible=inquiries.filter(i=>i.status==='visible');
+  const pipeline=visible.reduce((sum,i)=>sum+Number(i.proposed_amount||i.budget_max||i.budget_min||0),0);
+  const acceptedRevenue=deals.filter(d=>d.status!=='cancelled').reduce((sum,d)=>sum+Number(d.agreed_amount||0),0);
+  const pageViews=analytics.reduce((sum,a)=>sum+Number(a.page_views||0),0);
+  const unique=analytics.reduce((sum,a)=>sum+Number(a.unique_visitors||0),0);
+  const clicks=analytics.reduce((sum,a)=>sum+Number(a.link_clicks||0),0);
+  const chartMax=Math.max(1,...analytics.map(a=>Number(a.page_views||0)));
+  const filtered=inquiries.filter(i=>i.status===tab).sort((a,b)=>Number(b.score||0)-Number(a.score||0));
 
-  const currentTabDeals = deals.filter((d) => d.status === activeTab);
-
-  const handleCopyPublicLink = () => {
-    navigator.clipboard.writeText(`https://vallu.bio/@${creator.handle}`);
-    setCopiedLink(true);
-    setTimeout(() => setCopiedLink(false), 2000);
+  const copyLink=async()=>{
+    if(!page?.handle)return;
+    try{await navigator.clipboard.writeText(window.location.origin+`/c/${page.handle}`);setCopied(true);window.setTimeout(()=>setCopied(false),1700);}
+    catch{setError('Could not copy the public link.');}
   };
 
-  const handleSaveRates = () => {
-    updateCreator({
-      startingRate: Number(tempTarget),
-      floorRate: Number(tempFloor),
-    });
-    setIsEditingRates(false);
+  const openInquiry=async(inquiry:Inquiry)=>{
+    setSelected(inquiry);setTranscript([]);
+    if(!supabase)return;
+    const {data,error:messageError}=await supabase.from('inquiry_messages').select('id,sender,body,created_at').eq('inquiry_id',inquiry.id).order('created_at',{ascending:true});
+    if(messageError){setError(messageError.message);return;}
+    setTranscript(data||[]);
   };
 
-  const handleSimulateNewInquiry = () => {
-    const brands = ['Figma', 'Vercel', 'Raycast', 'OpenAI', 'Arc Browser'];
-    const randomBrand = brands[Math.floor(Math.random() * brands.length)];
-    const randomBudget = Math.round((creator.floorRate + Math.random() * 2500) / 100) * 100;
-
-    addProposal({
-      brandName: randomBrand,
-      brandEmail: `partnerships@${randomBrand.toLowerCase().replace(' ', '')}.com`,
-      campaignName: `${randomBrand} Q3 Creator Feature`,
-      deliverable: '1x Dedicated Video + X Thread Breakdown',
-      offeredBudget: randomBudget,
-      dealScore: randomBudget >= creator.startingRate ? 94 : 82,
-      redFlags: [],
-      paymentWindow: 'Net-15',
-      usageRights: '60-day digital organic',
-      transcript: [
-        { sender: 'brand', text: `Hi ${creator.name}, we'd love to partner on our upcoming release with a budget of $${randomBudget.toLocaleString()}.`, time: 'Just now' },
-        { sender: 'assistant', text: `Offer passed the autonomous rate screen ($${randomBudget.toLocaleString()}) and has been delivered to ${creator.name}'s inbox.`, time: 'Just now' },
-      ],
-    });
+  const setInquiryStatus=async(inquiry:Inquiry,status:Tab)=>{
+    if(!supabase)return;
+    setActionLoading(true);setError('');
+    try{
+      if(status==='accepted'){
+        if(!inquiry.proposed_amount||Number(inquiry.proposed_amount)<=0)throw new Error('This enquiry has no confirmed amount. It cannot become a deal yet.');
+        const {error:dealError}=await supabase.from('creator_deals').upsert({
+          creator_id:userId,inquiry_id:inquiry.id,brand_name:inquiry.brand_name,brand_email:inquiry.brand_email,
+          campaign_name:inquiry.campaign_name,currency:inquiry.currency||'INR',agreed_amount:Number(inquiry.proposed_amount),
+          deliverables:inquiry.deliverables||[],usage_rights:inquiry.usage_rights,exclusivity:inquiry.exclusivity,
+          whitelisting:inquiry.whitelisting||false,payment_terms:inquiry.payment_terms,status:'accepted',
+        },{onConflict:'inquiry_id'});
+        if(dealError)throw dealError;
+      }
+      const {error:updateError}=await supabase.from('brand_inquiries').update({status,decision_at:new Date().toISOString()}).eq('id',inquiry.id).eq('creator_id',userId);
+      if(updateError)throw updateError;
+      setInquiries(prev=>prev.map(i=>i.id===inquiry.id?{...i,status,decision_at:new Date().toISOString()}:i));
+      if(status==='accepted'){
+        const {data}=await supabase.from('creator_deals').select('*').eq('creator_id',userId).order('created_at',{ascending:false});
+        setDeals(data||[]);
+      }
+      setSelected(null);
+    }catch(e){setError(e instanceof Error?e.message:'Could not update this enquiry.');}
+    finally{setActionLoading(false);}
   };
 
-  return (
-    <div className="pt-24 sm:pt-28 pb-24 px-4 sm:px-6 max-w-6xl mx-auto space-y-8 animate-in fade-in duration-300">
-      {/* 1. Creator Top Bar & Bio Publication State */}
-      <div className="bg-[#131926] border border-[#1E293B] rounded-3xl p-6 sm:p-7 flex flex-col md:flex-row items-start md:items-center justify-between gap-6 shadow-[0_20px_50px_rgba(9,13,22,0.9)]">
-        <div className="flex items-center gap-4">
-          <div className="relative">
-            <img
-              src={creator.avatarUrl}
-              alt={creator.name}
-              className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl object-cover border-2 border-[#1E293B]"
-            />
-            <span className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-emerald-400 border-2 border-[#131926]" />
-          </div>
+  const saveRates=async()=>{
+    if(!supabase)return;
+    if(Number(minimum||0)>Number(target||0)) {setError('Your minimum rate cannot be higher than the target rate.');return;}
+    setSavingSettings(true);setError('');
+    try{
+      const {error:saveError}=await supabase.from('creator_settings').upsert({
+        creator_id:userId,currency,target_rate:Number(target)||0,minimum_rate:Number(minimum)||0
+      },{onConflict:'creator_id'});
+      if(saveError)throw saveError;
+    }catch(e){setError(e instanceof Error?e.message:'Could not save your rates.');}
+    finally{setSavingSettings(false);}
+  };
 
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-xl sm:text-2xl font-bold font-display text-white">
-                {creator.name}
-              </h1>
-              <span className="text-xs font-mono text-[#94A3B8] bg-[#090D16] px-2.5 py-0.5 rounded-full border border-[#1E293B]">
-                vallu.bio/@{creator.handle}
-              </span>
-            </div>
+  const logout=async()=>{
+    if(!supabase)return;
+    await supabase.auth.signOut();
+    onNavigate('login');
+  };
 
-            <div className="flex items-center gap-3 mt-1.5 text-xs text-[#94A3B8]">
-              {creator.isPublished ? (
-                <span className="flex items-center gap-1.5 text-emerald-400 font-medium">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                  Live on vallu.bio/@{creator.handle}
-                </span>
-              ) : (
-                <span className="flex items-center gap-1.5 text-amber-400 font-medium">
-                  <span className="w-2 h-2 rounded-full bg-amber-400" />
-                  Page Draft Saved (Unpublished)
-                </span>
-              )}
-              <span>·</span>
-              <span>{creator.followersTotal} Audience</span>
-              <span>·</span>
-              <span className="text-white font-mono font-semibold">0% Commission Active</span>
-            </div>
-          </div>
-        </div>
+  if(loading)return <main className="flex min-h-screen items-center justify-center bg-[#090A0D] text-xs text-[#A3A4AA]"><LoaderCircle className="mr-3 animate-spin" size={16}/>Loading your workspace…</main>;
 
-        {/* Public Link & Publication Action Buttons */}
-        <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto">
-          {creator.isPublished ? (
-            <>
-              <button
-                onClick={handleCopyPublicLink}
-                className="flex-1 sm:flex-none py-2 px-3.5 rounded-xl bg-[#090D16] border border-[#1E293B] hover:border-slate-500 text-xs text-slate-300 hover:text-white transition-colors flex items-center justify-center gap-1.5"
-              >
-                {copiedLink ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Share2 className="w-3.5 h-3.5 text-[#E11D48]" />}
-                <span>{copiedLink ? 'Link Copied!' : 'Copy Bio Link'}</span>
-              </button>
-
-              <button
-                onClick={() => onNavigate('public-landing')}
-                className="flex-1 sm:flex-none py-2 px-4 rounded-xl bg-[#1E293B] hover:bg-slate-700 text-xs font-semibold text-white transition-colors flex items-center justify-center gap-1.5"
-              >
-                <span>View Live Bio</span>
-                <ExternalLink className="w-3.5 h-3.5" />
-              </button>
-            </>
-          ) : (
-            <button
-              onClick={publishLandingPage}
-              className="w-full sm:w-auto py-2.5 px-5 rounded-xl bg-gradient-to-r from-[#E11D48] to-rose-600 hover:from-rose-600 hover:to-rose-500 text-white font-bold text-xs shadow-md transition-all flex items-center justify-center gap-2"
-            >
-              <Globe className="w-3.5 h-3.5" />
-              <span>Publish Bio Page Now</span>
-            </button>
-          )}
-
-          <button
-            onClick={() => onNavigate('landing-preview')}
-            className="flex-1 sm:flex-none py-2 px-3.5 rounded-xl bg-[#090D16] border border-[#1E293B] text-xs text-[#94A3B8] hover:text-white hover:bg-[#1E293B] transition-colors"
-          >
-            Customize Template
-          </button>
-        </div>
+  return <main className="min-h-screen bg-[#090A0D] px-4 pb-20 pt-28 text-[#F4F3F0] sm:px-6">
+    <div className="mx-auto max-w-[1200px]">
+      <div className="flex flex-col gap-5 border-b border-white/[0.08] pb-7 sm:flex-row sm:items-end sm:justify-between">
+        <div><div className="site-eyebrow">Your private workspace</div><h1 className="mt-4 font-display text-4xl font-semibold tracking-[-.06em] sm:text-5xl">Good to see you, {profile?.display_name||'creator'}.</h1><p className="mt-2 text-[11px] text-[#85868D]">Your page, your enquiries, your decisions.</p></div>
+        <div className="flex flex-wrap items-center gap-2"><button onClick={()=>onNavigate('onboarding')} className="rounded-full border border-white/10 px-4 py-2.5 text-[10px] text-[#C5C5C8] hover:bg-white/5">Edit page</button><button onClick={copyLink} className="inline-flex items-center gap-2 rounded-full bg-[#F0443E] px-4 py-2.5 text-[10px] font-semibold text-white hover:bg-[#FF554D]">{copied?<Check size={12}/>:<Copy size={12}/>} {copied?'Copied':'Copy creator link'}</button><button onClick={logout} title="Log out" className="flex h-9 w-9 items-center justify-center rounded-full border border-white/10 text-[#8D8E95] hover:text-white"><LogOut size={14}/></button></div>
       </div>
 
-      {/* 2. Dynamic Real-Time Metric Tiles */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Metric 1: Active Deal Pipeline */}
-        <div className="bg-[#131926] border border-[#1E293B] rounded-2xl p-4 sm:p-5">
-          <span className="text-[11px] font-mono text-[#94A3B8] uppercase block mb-1">
-            Active Deal Pipeline
-          </span>
-          <div className="text-xl sm:text-2xl font-bold font-mono text-white">
-            ${activePipelineValue.toLocaleString()} <span className="text-xs font-normal text-[#94A3B8]">USD</span>
-          </div>
-          <div className="flex items-center gap-1 text-[11px] text-emerald-400 font-mono mt-1">
-            <TrendingUp className="w-3 h-3" />
-            <span>{visibleDeals.length} active inbounds</span>
-          </div>
-        </div>
-
-        {/* Metric 2: Verified Earnings (Accepted) */}
-        <div className="bg-[#131926] border border-[#1E293B] rounded-2xl p-4 sm:p-5">
-          <span className="text-[11px] font-mono text-[#94A3B8] uppercase block mb-1">
-            Accepted Revenue
-          </span>
-          <div className="text-xl sm:text-2xl font-bold font-mono text-emerald-400">
-            ${acceptedEarningsValue.toLocaleString()} <span className="text-xs font-normal text-[#94A3B8]">USD</span>
-          </div>
-          <div className="text-[11px] text-[#94A3B8] font-mono mt-1">
-            {acceptedDeals.length} deals confirmed
-          </div>
-        </div>
-
-        {/* Metric 3: Starting Target Rate */}
-        <div className="bg-[#131926] border border-[#1E293B] rounded-2xl p-4 sm:p-5">
-          <span className="text-[11px] font-mono text-[#94A3B8] uppercase block mb-1">
-            Public Starting Rate
-          </span>
-          <div className="text-xl sm:text-2xl font-bold font-mono text-white">
-            ${creator.startingRate.toLocaleString()} <span className="text-xs font-normal text-[#94A3B8]">USD</span>
-          </div>
-          <div className="text-[11px] text-slate-400 font-mono mt-1">
-            Avg deal size: ${avgDealValue.toLocaleString()}
-          </div>
-        </div>
-
-        {/* Metric 4: Confidential Floor Rate */}
-        <div className="bg-[#131926] border border-rose-900/40 rounded-2xl p-4 sm:p-5 relative overflow-hidden">
-          <span className="text-[11px] font-mono text-rose-300 uppercase block mb-1 flex items-center gap-1">
-            <ShieldCheck className="w-3.5 h-3.5 text-[#E11D48]" />
-            Rate Floor (Confidential)
-          </span>
-          <div className="text-xl sm:text-2xl font-bold font-mono text-[#E11D48]">
-            ${creator.floorRate.toLocaleString()} <span className="text-xs font-normal text-[#94A3B8]">USD</span>
-          </div>
-          <button
-            onClick={() => setIsEditingRates(!isEditingRates)}
-            className="text-[10px] text-rose-400 underline font-mono mt-1 hover:text-rose-300"
-          >
-            {isEditingRates ? 'Close Editor' : 'Edit Rate Limits'}
-          </button>
-        </div>
+      <div className="mt-7 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {[
+          {label:'Page views',value:pageViews.toLocaleString(),hint:'Recorded page visits',icon:Eye,color:'text-[#FF963F]'},
+          {label:'Unique visitors',value:unique.toLocaleString(),hint:'Privacy-friendly estimate',icon:Globe,color:'text-[#F0443E]'},
+          {label:'Visible offers',value:String(visible.length),hint:'Awaiting your decision',icon:Inbox,color:'text-[#FF963F]'},
+          {label:'Accepted value',value:money(acceptedRevenue,currency),hint:'Across accepted deals',icon:TrendingUp,color:'text-emerald-300'},
+        ].map(item=>{const Icon=item.icon;return <div key={item.label} className="rounded-2xl border border-white/[0.09] bg-[#141519] p-5"><div className="flex items-center justify-between"><span className="text-[10px] text-[#909198]">{item.label}</span><Icon size={15} className={item.color}/></div><p className="mt-5 font-display text-3xl font-semibold tracking-[-.05em]">{item.value}</p><p className="mt-1 text-[9px] text-[#6F7076]">{item.hint}</p></div>})}
       </div>
 
-      {/* Inline Rate Editor drawer */}
-      {isEditingRates && (
-        <div className="bg-[#131926] border border-[#E11D48]/50 rounded-2xl p-5 animate-in fade-in duration-200">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm font-bold text-white flex items-center gap-2">
-              <Sliders className="w-4 h-4 text-[#E11D48]" />
-              <span>Adjust Commercial Rate Parameters</span>
-            </h3>
-            <span className="text-[11px] text-[#94A3B8]">Instant sync to public landing page</span>
-          </div>
+      <div className="mt-6 grid gap-5 xl:grid-cols-[1.45fr_.75fr]">
+        <section className="rounded-2xl border border-white/[0.09] bg-[#141519] p-5 sm:p-6">
+          <div className="flex items-center justify-between"><div><p className="text-[10px] font-semibold">Page activity</p><p className="mt-1 text-[9px] text-[#74757C]">Daily views · recent 30 days</p></div><BarChart3 size={16} className="text-[#F0443E]"/></div>
+          {analytics.length===0?<div className="flex min-h-[178px] flex-col items-center justify-center text-center"><Activity size={19} className="text-[#65666C]"/><p className="mt-3 text-[11px] text-[#B9B9BC]">No page activity yet.</p><p className="mt-1 text-[9px] text-[#73747A]">Share your public creator link to start learning what works.</p></div>:<div className="mt-7 flex h-[150px] items-end gap-1.5">{analytics.map((day)=><div key={day.day} title={`${day.day}: ${day.page_views} views`} className="group relative flex-1 rounded-t-[3px] bg-[#F0443E]/70 transition-colors hover:bg-[#FF963F]" style={{height:`${Math.max(3,(Number(day.page_views||0)/chartMax)*100)}%`}}/>)}</div>}
+          <div className="mt-5 flex flex-wrap gap-6 border-t border-white/[0.08] pt-4"><div><p className="text-[9px] text-[#73747A]">Link clicks</p><p className="mt-1 text-sm font-semibold">{clicks.toLocaleString()}</p></div><div><p className="text-[9px] text-[#73747A]">Inquiry starts</p><p className="mt-1 text-sm font-semibold">{inquiries.length.toLocaleString()}</p></div><div><p className="text-[9px] text-[#73747A]">Completed enquiries</p><p className="mt-1 text-sm font-semibold">{inquiries.filter(i=>i.submitted_at).length.toLocaleString()}</p></div></div>
+        </section>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 text-xs">
-            <div>
-              <div className="flex justify-between mb-1">
-                <span className="text-[#94A3B8]">Public Starting Rate</span>
-                <span className="font-mono text-white font-bold">${tempTarget.toLocaleString()}</span>
-              </div>
-              <input
-                type="range"
-                min={1000}
-                max={15000}
-                step={250}
-                value={tempTarget}
-                onChange={(e) => setTempTarget(Number(e.target.value))}
-                className="w-full accent-[#E11D48] cursor-pointer"
-              />
-            </div>
-
-            <div>
-              <div className="flex justify-between mb-1">
-                <span className="text-[#94A3B8]">Confidential Floor Rate (Private)</span>
-                <span className="font-mono text-[#E11D48] font-bold">${tempFloor.toLocaleString()}</span>
-              </div>
-              <input
-                type="range"
-                min={500}
-                max={tempTarget}
-                step={200}
-                value={tempFloor}
-                onChange={(e) => setTempFloor(Number(e.target.value))}
-                className="w-full accent-[#E11D48] cursor-pointer"
-              />
-            </div>
-          </div>
-
-          <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-[#1E293B]">
-            <button
-              onClick={() => setIsEditingRates(false)}
-              className="px-3.5 py-1.5 text-xs text-[#94A3B8] hover:text-white rounded-lg"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleSaveRates}
-              className="px-4 py-1.5 text-xs font-bold text-white bg-[#E11D48] hover:bg-rose-600 rounded-lg transition-colors"
-            >
-              Save Rate Limits
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* 3. Deal Inbox Section with 4 Tabs */}
-      <div className="bg-[#131926] border border-[#1E293B] rounded-3xl p-6 sm:p-8 shadow-xl space-y-6">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div>
-            <h2 className="text-lg font-bold font-display text-white">
-              Sponsor Proposal Inbox
-            </h2>
-            <p className="text-xs text-[#94A3B8] mt-0.5">
-              Screened inbound inquiries from your public bio page.
-            </p>
-          </div>
-
-          {/* Quick Simulation Button */}
-          <button
-            onClick={handleSimulateNewInquiry}
-            className="text-xs font-semibold px-3 py-1.5 rounded-xl bg-[#090D16] border border-[#1E293B] hover:border-[#E11D48] text-rose-300 hover:text-white transition-colors flex items-center gap-1.5 self-stretch sm:self-auto justify-center"
-          >
-            <Plus className="w-3.5 h-3.5 text-[#E11D48]" />
-            <span>Simulate Brand Offer</span>
-          </button>
-        </div>
-
-        {/* 4 Inbox Tabs */}
-        <div className="flex items-center gap-1 border-b border-[#1E293B] pb-2 text-xs font-medium overflow-x-auto">
-          {[
-            { id: 'visible', label: 'Visible Pipeline', count: visibleDeals.length },
-            { id: 'on_hold', label: 'On Hold', count: onHoldDeals.length },
-            { id: 'accepted', label: 'Accepted Deals', count: acceptedDeals.length },
-            { id: 'declined', label: 'Declined', count: declinedDeals.length },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id as any)}
-              className={`py-2 px-3.5 rounded-xl transition-all whitespace-nowrap flex items-center gap-2 ${
-                activeTab === tab.id
-                  ? 'bg-[#1E293B] text-white font-bold shadow-sm'
-                  : 'text-[#94A3B8] hover:text-white hover:bg-[#1E293B]/40'
-              }`}
-            >
-              <span>{tab.label}</span>
-              <span
-                className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full ${
-                  activeTab === tab.id ? 'bg-[#E11D48] text-white' : 'bg-[#090D16] text-[#94A3B8]'
-                }`}
-              >
-                {tab.count}
-              </span>
-            </button>
-          ))}
-        </div>
-
-        {/* Deals List */}
-        {currentTabDeals.length === 0 ? (
-          <div className="py-12 text-center text-xs text-[#94A3B8] space-y-2">
-            <p>No proposals currently in the {activeTab.replace('_', ' ')} queue.</p>
-            <p className="text-[11px] text-slate-500">
-              When brands submit through your public link, proposals automatically populate here.
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {currentTabDeals.map((deal) => {
-              const uplift = deal.offeredBudget - creator.floorRate;
-              return (
-                <div
-                  key={deal.id}
-                  className="bg-[#090D16] border border-[#1E293B] hover:border-slate-600 rounded-2xl p-4 sm:p-5 transition-all flex flex-col md:flex-row items-start md:items-center justify-between gap-4"
-                >
-                  <div className="space-y-1.5 flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-bold text-sm sm:text-base text-white">
-                        {deal.brandName}
-                      </span>
-                      <span className="text-[11px] text-[#94A3B8] font-mono">
-                        {deal.campaignName}
-                      </span>
-                      <span
-                        className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full ${
-                          deal.dealScore >= 80
-                            ? 'bg-emerald-950/40 text-emerald-400 border border-emerald-900/60'
-                            : 'bg-rose-950/40 text-rose-400 border border-rose-900/60'
-                        }`}
-                      >
-                        Score: {deal.dealScore}/100
-                      </span>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-3 text-xs text-[#94A3B8]">
-                      <span className="text-slate-300">{deal.deliverable}</span>
-                      <span>·</span>
-                      <span>{deal.submittedAt}</span>
-                      <span>·</span>
-                      <span className="text-emerald-400 font-mono">
-                        {uplift >= 0 ? `+$${uplift.toLocaleString()} above floor` : `Below floor`}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Financial & Status Action Zone */}
-                  <div className="flex items-center gap-4 w-full md:w-auto justify-between md:justify-end border-t md:border-t-0 pt-3 md:pt-0 border-[#1E293B]">
-                    <div className="text-right">
-                      <span className="text-[10px] text-[#94A3B8] uppercase block font-mono">Offer Amount</span>
-                      <span className="text-lg font-bold font-mono text-emerald-400">
-                        ${deal.offeredBudget.toLocaleString()} <span className="text-xs font-normal">USD</span>
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-1.5">
-                      {activeTab === 'visible' && (
-                        <>
-                          <button
-                            onClick={() => updateDealStatus(deal.id, 'accepted')}
-                            className="p-2 sm:px-3 sm:py-2 rounded-xl bg-[#E11D48] hover:bg-rose-600 text-white font-bold text-xs transition-colors flex items-center gap-1 shadow-sm"
-                            title="Accept Deal & Send Invoice"
-                          >
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            <span className="hidden sm:inline">Accept</span>
-                          </button>
-
-                          <button
-                            onClick={() => updateDealStatus(deal.id, 'on_hold')}
-                            className="p-2 sm:px-2.5 sm:py-2 rounded-xl bg-[#1E293B] hover:bg-slate-700 text-xs text-[#94A3B8] hover:text-white transition-colors"
-                            title="Put On Hold"
-                          >
-                            <Clock className="w-3.5 h-3.5" />
-                          </button>
-
-                          <button
-                            onClick={() => updateDealStatus(deal.id, 'declined')}
-                            className="p-2 sm:px-2.5 sm:py-2 rounded-xl bg-[#1E293B] hover:bg-rose-950/40 text-xs text-rose-400 transition-colors"
-                            title="Decline Deal"
-                          >
-                            <XCircle className="w-3.5 h-3.5" />
-                          </button>
-                        </>
-                      )}
-
-                      {activeTab === 'on_hold' && (
-                        <button
-                          onClick={() => updateDealStatus(deal.id, 'visible')}
-                          className="px-3 py-1.5 rounded-xl bg-[#1E293B] hover:bg-slate-700 text-xs text-white transition-colors"
-                        >
-                          Move to Inbox
-                        </button>
-                      )}
-
-                      <button
-                        onClick={() => setSelectedDeal(deal)}
-                        className="p-2 rounded-xl bg-[#131926] hover:bg-[#1E293B] text-[#94A3B8] hover:text-white transition-colors"
-                        title="Inspect Deal Scope & Transcript"
-                      >
-                        <Eye className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
+        <section className="rounded-2xl border border-white/[0.09] bg-[#141519] p-5 sm:p-6">
+          <div className="flex items-center justify-between"><p className="text-[10px] font-semibold">Your public page</p><span className={`rounded-full px-2.5 py-1 text-[9px] ${page?.status==='published'?'bg-emerald-400/10 text-emerald-300':'bg-[#FF963F]/10 text-[#FFB36B]'}`}>{page?.status==='published'?'Published':'Draft'}</span></div>
+          <div className="mt-5 rounded-xl border border-white/[0.08] bg-[#0D0E11] p-4"><div className="flex items-center gap-3"><div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#F0443E] font-display text-sm font-bold">{String(profile?.display_name||'C').slice(0,1)}</div><div><p className="text-[11px] font-semibold">{profile?.display_name}</p><p className="text-[9px] text-[#75767C]">/c/{page?.handle}</p></div></div><p className="mt-4 line-clamp-2 text-[10px] leading-relaxed text-[#8C8D94]">{page?.page_data?.headline||'Your creator headline will appear here.'}</p><div className="mt-4 flex items-center gap-2 text-[9px] text-[#777980]"><LockKeyhole size={11}/> Private settings stay private</div></div>
+          <div className="mt-4 flex gap-2"><button onClick={()=>onNavigate('landing-preview')} className="flex-1 rounded-full border border-white/10 py-2.5 text-[10px] text-[#C9C9CC] hover:bg-white/5">Preview page</button><button onClick={()=>onNavigate('onboarding')} className="flex-1 rounded-full border border-white/10 py-2.5 text-[10px] text-[#C9C9CC] hover:bg-white/5">Edit details</button></div>
+          {page?.status==='published'&&<button onClick={()=>window.open(`/c/${page.handle}`,'_blank','noopener,noreferrer')} className="mt-3 flex w-full items-center justify-center gap-2 text-[9px] text-[#FF963F] hover:text-white">Open public page <ExternalLink size={11}/></button>}
+        </section>
       </div>
 
-      {/* 4. Deal Inspection Modal */}
-      {selectedDeal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-[#131926] border border-[#1E293B] rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl animate-in zoom-in-95 duration-200">
-            <div className="flex items-center justify-between pb-4 mb-4 border-b border-[#1E293B]">
-              <div>
-                <h3 className="text-base font-bold text-white">{selectedDeal.brandName}</h3>
-                <span className="text-xs text-[#94A3B8] font-mono">{selectedDeal.brandEmail}</span>
-              </div>
-              <span className="text-base font-mono font-bold text-emerald-400">
-                ${selectedDeal.offeredBudget.toLocaleString()} USD
-              </span>
-            </div>
-
-            <div className="space-y-3 text-xs mb-6">
-              <div className="bg-[#090D16] p-3 rounded-xl border border-[#1E293B] space-y-1">
-                <span className="text-[#94A3B8] uppercase text-[10px] font-mono block">Deliverables Scope</span>
-                <p className="text-white font-medium">{selectedDeal.deliverable}</p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-[#090D16] p-3 rounded-xl border border-[#1E293B]">
-                  <span className="text-[#94A3B8] text-[10px] font-mono block">Rights Duration</span>
-                  <span className="text-white">{selectedDeal.usageRights}</span>
-                </div>
-                <div className="bg-[#090D16] p-3 rounded-xl border border-[#1E293B]">
-                  <span className="text-[#94A3B8] text-[10px] font-mono block">Payment Terms</span>
-                  <span className="text-white">{selectedDeal.paymentWindow}</span>
-                </div>
-              </div>
-
-              {/* Negotiation Transcript */}
-              <div className="bg-[#090D16] p-3 rounded-xl border border-[#1E293B] space-y-2">
-                <span className="text-[#94A3B8] text-[10px] font-mono block">Negotiation Log</span>
-                <div className="space-y-1.5 max-h-36 overflow-y-auto">
-                  {selectedDeal.transcript.map((msg, idx) => (
-                    <div
-                      key={idx}
-                      className={`p-2 rounded-lg text-[11px] ${
-                        msg.sender === 'brand'
-                          ? 'bg-[#131926] text-slate-300'
-                          : 'bg-[#E11D48]/15 text-rose-200 border border-rose-500/20'
-                      }`}
-                    >
-                      <span className="text-[9px] font-bold font-mono block text-[#94A3B8]">
-                        {msg.sender === 'brand' ? selectedDeal.brandName : 'VALLU Assistant'} · {msg.time}
-                      </span>
-                      {msg.text}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            <div className="flex gap-2">
-              <button
-                onClick={() => setSelectedDeal(null)}
-                className="flex-1 py-2 text-xs font-semibold text-[#94A3B8] hover:text-white rounded-xl hover:bg-[#090D16] transition-colors"
-              >
-                Close
-              </button>
-
-              {selectedDeal.status !== 'accepted' && (
-                <button
-                  onClick={() => {
-                    updateDealStatus(selectedDeal.id, 'accepted');
-                    setSelectedDeal(null);
-                  }}
-                  className="flex-1 py-2 text-xs font-bold text-white bg-[#E11D48] hover:bg-rose-600 rounded-xl transition-colors shadow-md"
-                >
-                  Accept Deal
-                </button>
-              )}
-            </div>
-          </div>
+      <section className="mt-7 overflow-hidden rounded-2xl border border-white/[0.09] bg-[#141519]">
+        <div className="flex flex-col gap-4 border-b border-white/[0.08] p-5 sm:p-6"><div className="flex items-center justify-between gap-3"><div><div className="site-eyebrow">Brand inbox</div><h2 className="mt-2 font-display text-2xl font-semibold tracking-[-.05em]">Every enquiry, in context.</h2></div><button onClick={()=>load().catch(e=>setError(e.message))} className="flex h-9 w-9 items-center justify-center rounded-full border border-white/10 text-[#85868D] hover:text-white" title="Refresh"><RefreshCw size={13}/></button></div>
+          <div className="flex gap-1 overflow-x-auto pb-1">{tabs.map(item=><button key={item.id} onClick={()=>setTab(item.id)} className={`flex shrink-0 items-center gap-2 rounded-full px-3.5 py-2 text-[9px] transition-colors ${tab===item.id?'bg-[#F0443E] text-white':'bg-white/[0.035] text-[#92939A] hover:bg-white/[0.08]'}`}>{item.label}<span className={`font-mono ${tab===item.id?'text-white/70':'text-[#66676D]'}`}>{counts[item.id]}</span></button>)}</div>
         </div>
-      )}
+        {filtered.length===0?<div className="flex min-h-[210px] flex-col items-center justify-center px-5 text-center"><Inbox size={20} className="text-[#66676D]"/><p className="mt-4 text-[12px] font-medium">{tab==='visible'?'No offers to review.':`No ${tabs.find(t=>t.id===tab)?.label.toLowerCase()} items.`}</p><p className="mt-1 max-w-[320px] text-[9px] leading-relaxed text-[#74757C]">{tab==='visible'?'When a brand completes an enquiry on your public page, its proposal will appear here.':'This inbox section will populate when there is something to show.'}</p></div>:<div className="divide-y divide-white/[0.07]">{filtered.map(inquiry=><div key={inquiry.id} className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between sm:px-6"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="text-[12px] font-semibold">{inquiry.brand_name}</p>{inquiry.score!==null&&<span className="rounded-full bg-[#FF963F]/10 px-2 py-1 text-[9px] text-[#FFB36B]">Score {Number(inquiry.score).toFixed(1)}/10</span>}</div><p className="mt-1 text-[10px] text-[#92939A]">{inquiry.campaign_name||'Brand collaboration enquiry'}</p><div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[9px] text-[#777980]"><span>{inquiry.proposed_amount?money(inquiry.proposed_amount,inquiry.currency):'Budget not confirmed'}</span><span>{Array.isArray(inquiry.deliverables)?inquiry.deliverables.length+' deliverables':'Scope pending'}</span>{inquiry.expires_at&&<span className="inline-flex items-center gap-1"><Clock3 size={10}/>{timeLeft(inquiry.expires_at)}</span>}</div></div><div className="flex shrink-0 items-center gap-2"><button onClick={()=>openInquiry(inquiry)} className="rounded-full border border-white/10 px-3.5 py-2.5 text-[9px] text-[#C6C6C8] hover:bg-white/5">Inspect details</button>{tab==='visible'&&<><button onClick={()=>setInquiryStatus(inquiry,'on_hold')} disabled={actionLoading} title="Place on hold" className="flex h-9 w-9 items-center justify-center rounded-full border border-white/10 text-[#92939A] hover:text-white"><Pause size={12}/></button><button onClick={()=>setInquiryStatus(inquiry,'accepted')} disabled={actionLoading} className="rounded-full bg-[#F0443E] px-4 py-2.5 text-[9px] font-semibold text-white hover:bg-[#FF554D]">Accept</button></>}</div></div>)}</div>}
+      </section>
+
+      <section className="mt-7 rounded-2xl border border-white/[0.09] bg-[#141519] p-5 sm:p-6">
+        <div className="flex items-center gap-2"><LockKeyhole size={14} className="text-[#FF963F]"/><p className="text-[10px] font-semibold">Private rate settings</p></div><p className="mt-1 text-[9px] text-[#74757C]">Your floor is never visible to brands or on your public page.</p>
+        <div className="mt-5 grid gap-4 sm:grid-cols-3 sm:items-end"><label className="text-[9px] text-[#92939A]">Currency<select value={currency} onChange={e=>setCurrency(e.target.value)} className="auth-field mt-2"><option value="INR">INR</option><option value="USD">USD</option></select></label><label className="text-[9px] text-[#92939A]">Target rate<input type="number" min="0" value={target} onChange={e=>setTarget(e.target.value)} className="auth-field mt-2" placeholder="Your target"/></label><label className="text-[9px] text-[#92939A]">Minimum rate<input type="number" min="0" value={minimum} onChange={e=>setMinimum(e.target.value)} className="auth-field mt-2" placeholder="Private minimum"/></label></div>
+        <button onClick={saveRates} disabled={savingSettings} className="mt-4 inline-flex items-center gap-2 rounded-full border border-white/10 px-4 py-2.5 text-[9px] text-[#C7C7CA] hover:bg-white/5 disabled:opacity-50">{savingSettings?<LoaderCircle size={12} className="animate-spin"/>:<Check size={12}/>} Save private rates</button>
+      </section>
+
+      {error&&<div role="alert" className="mt-5 rounded-xl border border-[#F0443E]/25 bg-[#F0443E]/[0.08] px-4 py-3 text-[10px] text-[#FF9B95]">{error}</div>}
     </div>
-  );
+
+    {selected&&<div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 p-3 backdrop-blur-sm sm:p-6" onMouseDown={e=>{if(e.target===e.currentTarget)setSelected(null);}}>
+      <section className="flex max-h-[90vh] w-full max-w-[760px] flex-col overflow-hidden rounded-[24px] border border-white/[0.12] bg-[#15161A] shadow-2xl">
+        <header className="flex items-start justify-between gap-4 border-b border-white/[0.08] p-5 sm:p-6"><div><p className="font-mono text-[9px] uppercase tracking-[.15em] text-[#F0443E]">BRAND PROPOSAL</p><h2 className="mt-2 font-display text-2xl font-semibold tracking-[-.05em]">{selected.brand_name}</h2><p className="mt-1 text-[10px] text-[#8C8D93]">{selected.campaign_name||'Collaboration enquiry'}</p></div><button onClick={()=>setSelected(null)} className="flex h-9 w-9 items-center justify-center rounded-full border border-white/10 text-[#92939A] hover:text-white"><X size={14}/></button></header>
+        <div className="grid min-h-0 flex-1 gap-0 overflow-y-auto md:grid-cols-[.88fr_1.12fr]">
+          <div className="space-y-4 border-b border-white/[0.08] p-5 md:border-b-0 md:border-r sm:p-6">
+            <div className="rounded-xl border border-[#FF963F]/20 bg-[#FF963F]/[0.06] p-4"><p className="text-[9px] text-[#9A8B7C]">PROPOSED COMPENSATION</p><p className="mt-2 font-display text-3xl font-semibold">{selected.proposed_amount?money(selected.proposed_amount,selected.currency):'Not provided'}</p><p className="mt-1 text-[9px] text-[#7D7E84]">Currency: {selected.currency||'INR'}</p></div>
+            {[['Deliverables',Array.isArray(selected.deliverables)?selected.deliverables.join(', '):String(selected.deliverables||'Not provided')],['Usage rights',selected.usage_rights||'Not provided'],['Exclusivity',selected.exclusivity||'Not provided'],['Whitelisting',selected.whitelisting?'Requested':'Not requested'],['Payment terms',selected.payment_terms||'Not provided'],['Deadline',selected.campaign_timeline||'Not provided'],['Score explanation',selected.score_explanation||'Not available']].map(([label,value])=><div key={label}><p className="text-[9px] uppercase tracking-[.1em] text-[#707178]">{label}</p><p className="mt-1 text-[10px] leading-relaxed text-[#D0D0D2]">{value}</p></div>)}
+            {selected.hard_block_reason&&<div className="rounded-lg border border-[#F0443E]/25 bg-[#F0443E]/[0.08] p-3 text-[9px] text-[#FF9B95]">Hard block: {selected.hard_block_reason}</div>}
+          </div>
+          <div className="flex min-h-[300px] flex-col p-5 sm:p-6"><div className="mb-4 flex items-center gap-2"><MessageCircle size={13} className="text-[#F0443E]"/><p className="text-[10px] font-semibold">Full conversation</p></div><div className="flex-1 space-y-3">{transcript.length===0?<p className="text-[10px] text-[#73747A]">No conversation messages are stored for this enquiry yet.</p>:transcript.map((message:any)=><div key={message.id} className={`flex ${message.sender==='brand'?'justify-start':'justify-end'}`}><div className={`max-w-[90%] rounded-xl px-3.5 py-3 ${message.sender==='brand'?'bg-white/[0.055]':'bg-[#F0443E]/15 border border-[#F0443E]/20'}`}><p className="mb-1 text-[8px] uppercase tracking-[.1em] text-[#85868D]">{message.sender}</p><p className="text-[10px] leading-relaxed text-[#E2E1E0]">{message.body}</p><p className="mt-2 text-[8px] text-[#74757A]">{new Date(message.created_at).toLocaleString()}</p></div></div>)}</div></div>
+        </div>
+        <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.08] p-4 sm:p-5"><span className="text-[9px] text-[#73747A]">You make the final decision.</span><div className="flex gap-2"><button onClick={()=>setInquiryStatus(selected,'declined')} disabled={actionLoading} className="rounded-full border border-white/10 px-4 py-2.5 text-[9px] text-[#C3C3C6] hover:border-[#F0443E]/40">Decline</button><button onClick={()=>setInquiryStatus(selected,'accepted')} disabled={actionLoading||!selected.proposed_amount} className="rounded-full bg-[#F0443E] px-4 py-2.5 text-[9px] font-semibold text-white hover:bg-[#FF554D] disabled:opacity-40">{actionLoading?'Saving…':'Accept proposal'}</button></div></footer>
+      </section>
+    </div>}
+  </main>;
 };
