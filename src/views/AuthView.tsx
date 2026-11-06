@@ -15,7 +15,9 @@ export const AuthView: React.FC<AuthViewProps> = ({ initialMode = 'signup', onNa
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [forgotMode, setForgotMode] = useState(false);
+  const [forgotMode, setForgotMode] = useState(() => window.location.pathname === '/forgot-password');
+  const [recoveryMode, setRecoveryMode] = useState(() => new URLSearchParams(window.location.search).get('recovery') === '1');
+  const [confirmPassword, setConfirmPassword] = useState('');
 
   const ensureCreatorRows = async (user: { id: string; email?: string; user_metadata?: Record<string, unknown> }) => {
     if (!supabase) throw new Error('The authentication service is not configured. Add the Supabase URL and publishable key before continuing.');
@@ -136,6 +138,39 @@ export const AuthView: React.FC<AuthViewProps> = ({ initialMode = 'signup', onNa
     }
   };
 
+  const handlePasswordUpdate = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setError('');
+    setNotice('');
+    if (!supabase) {
+      setError('The authentication service is not configured yet.');
+      return;
+    }
+    if (password.length < 8) {
+      setError('Use a password with at least 8 characters.');
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError('The passwords do not match.');
+      return;
+    }
+    setLoading(true);
+    try {
+      const { error: updateError } = await supabase.auth.updateUser({ password });
+      if (updateError) throw updateError;
+      setRecoveryMode(false);
+      setMode('login');
+      setPassword('');
+      setConfirmPassword('');
+      setNotice('Your password has been updated. Log in with your new password.');
+      window.history.replaceState({}, '', '/login');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'We could not update your password.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const switchMode = (next: 'signup' | 'login') => {
     setMode(next);
     setForgotMode(false);
@@ -165,7 +200,17 @@ export const AuthView: React.FC<AuthViewProps> = ({ initialMode = 'signup', onNa
         <section className="p-6 sm:p-10 lg:p-12">
           <button onClick={() => onNavigate('home')} className="mb-10 inline-flex items-center gap-2 text-[10px] text-[#8D8E95] transition-colors hover:text-white"><ArrowLeft size={13}/> Back to VALLU</button>
 
-          {forgotMode ? <>
+          {recoveryMode ? <>
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-[#F0443E]/20 bg-[#F0443E]/[0.08] text-[#F0443E]"><KeyRound size={18}/></div>
+            <h2 className="mt-6 font-display text-3xl font-semibold tracking-[-.05em]">Choose a new password.</h2>
+            <p className="mt-2 max-w-[340px] text-[11px] leading-relaxed text-[#92939A]">Set a new password for your creator workspace.</p>
+            <form onSubmit={handlePasswordUpdate} className="mt-8 space-y-4">
+              <label className="block text-[10px] font-medium text-[#B8B8BC]">New password<input className="auth-field mt-2" type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="At least 8 characters" required minLength={8} autoComplete="new-password"/></label>
+              <label className="block text-[10px] font-medium text-[#B8B8BC]">Confirm new password<input className="auth-field mt-2" type="password" value={confirmPassword} onChange={e=>setConfirmPassword(e.target.value)} placeholder="Enter it again" required minLength={8} autoComplete="new-password"/></label>
+              {error && <div role="alert" className="rounded-xl border border-[#F0443E]/25 bg-[#F0443E]/[0.08] px-3.5 py-3 text-[10px] leading-relaxed text-[#FF9B95]">{error}</div>}
+              <button disabled={loading} className="site-button site-button-primary w-full">{loading?<LoaderCircle size={15} className="animate-spin"/>:'Update password'} <ArrowRight size={14}/></button>
+            </form>
+          </> : forgotMode ? <>
             <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-[#F0443E]/20 bg-[#F0443E]/[0.08] text-[#F0443E]"><KeyRound size={18}/></div>
             <h2 className="mt-6 font-display text-3xl font-semibold tracking-[-.05em]">Reset your password.</h2>
             <p className="mt-2 max-w-[340px] text-[11px] leading-relaxed text-[#92939A]">We’ll send a secure reset link to the email associated with your account.</p>
