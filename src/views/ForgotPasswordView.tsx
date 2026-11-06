@@ -1,142 +1,80 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { PageRoute } from '../types';
-import { Mail, ArrowRight, CheckCircle2, Lock, KeyRound } from 'lucide-react';
+import { ArrowLeft, ArrowUpRight, CheckCircle2, KeyRound, Mail, ShieldCheck } from 'lucide-react';
+import { supabase } from '../lib/supabase';
 
-interface ForgotPasswordViewProps {
-  onNavigate: (route: PageRoute) => void;
-}
+interface ForgotPasswordViewProps { onNavigate: (route: PageRoute) => void; }
 
 export const ForgotPasswordView: React.FC<ForgotPasswordViewProps> = ({ onNavigate }) => {
   const [email, setEmail] = useState('');
-  const [isSent, setIsSent] = useState(false);
-  const [isResetting, setIsResetting] = useState(false);
   const [newPassword, setNewPassword] = useState('');
-  const [isDone, setIsDone] = useState(false);
+  const [mode, setMode] = useState<'request' | 'sent' | 'update' | 'done'>('request');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
-  const handleSendLink = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!email) return;
-    setIsSent(true);
+  useEffect(() => {
+    if (!supabase) return;
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY') setMode('update');
+    });
+    void supabase.auth.getSession().then(({ data }) => {
+      if (data.session && window.location.hash.includes('type=recovery')) setMode('update');
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const sendLink = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setError('');
+    if (!supabase) { setError('Account recovery is not connected. Check the app’s Supabase environment settings.'); return; }
+    setLoading(true);
+    try {
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
+        redirectTo: `${window.location.origin}/forgot-password`,
+      });
+      if (resetError) throw resetError;
+      setMode('sent');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'The recovery email could not be sent.');
+    } finally { setLoading(false); }
   };
 
-  const handleCompleteReset = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newPassword) return;
-    setIsDone(true);
-    setTimeout(() => {
-      onNavigate('login');
-    }, 1500);
+  const updatePassword = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setError('');
+    if (newPassword.length < 8) { setError('Use a password with at least 8 characters.'); return; }
+    if (!supabase) { setError('Account recovery is not connected.'); return; }
+    setLoading(true);
+    try {
+      const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
+      if (updateError) throw updateError;
+      setMode('done');
+      await supabase.auth.signOut();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Your password could not be updated.');
+    } finally { setLoading(false); }
   };
 
-  return (
-    <div className="pt-24 sm:pt-28 pb-20 min-h-[85vh] flex items-center justify-center px-4 sm:px-6">
-      <div className="w-full max-w-md bg-[#131926] border border-[#1E293B] rounded-3xl p-6 sm:p-10 shadow-[0_24px_60px_-12px_rgba(9,13,22,0.95)] backdrop-blur-xl relative overflow-hidden">
-        <div className="text-center space-y-2 mb-6 sm:mb-8">
-          <div className="w-10 h-10 rounded-xl bg-[#090D16] border border-[#E11D48]/30 text-[#E11D48] mx-auto flex items-center justify-center">
-            <KeyRound className="w-5 h-5" />
-          </div>
-          <h1 className="font-display font-extrabold text-2xl text-[#F1F5F9]">Reset Password</h1>
-          <p className="text-xs text-[#94A3B8]">
-            Recover your VALLU creator credentials and restore access to your deal inbox.
-          </p>
-        </div>
-
-        {isDone ? (
-          <div className="text-center py-6 space-y-3 animate-in fade-in zoom-in-95 duration-200">
-            <CheckCircle2 className="w-10 h-10 text-emerald-400 mx-auto" />
-            <h3 className="font-bold text-[#F1F5F9] text-base">Password Updated</h3>
-            <p className="text-xs text-[#94A3B8]">Redirecting to login with your new credentials...</p>
-          </div>
-        ) : isResetting ? (
-          <form onSubmit={handleCompleteReset} className="space-y-4">
-            <div>
-              <label className="block text-xs font-medium text-[#94A3B8] mb-1">New Password</label>
-              <div className="relative">
-                <Lock className="w-4 h-4 text-[#94A3B8]/60 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                <input
-                  type="password"
-                  required
-                  placeholder="Minimum 8 characters"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  className="w-full bg-[#090D16] border border-[#1E293B] rounded-xl pl-10 pr-3.5 py-2.5 text-xs text-[#F1F5F9] focus:outline-none focus:border-[#E11D48]"
-                />
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              className="w-full py-3 rounded-full bg-gradient-to-r from-[#E11D48] to-rose-600 hover:from-rose-600 hover:to-rose-500 text-white font-semibold text-xs shadow-md transition-all uppercase tracking-wider active:scale-95"
-            >
-              Save New Password
-            </button>
-          </form>
-        ) : isSent ? (
-          <div className="text-center py-4 space-y-4 animate-in fade-in zoom-in-95 duration-200">
-            <div className="p-4 rounded-xl bg-[#090D16] border border-emerald-500/30 text-xs text-emerald-300 leading-relaxed">
-              We have dispatched a secure recovery link to <strong className="text-white font-mono">{email}</strong>.
-            </div>
-
-            <p className="text-[11px] text-[#94A3B8]">
-              For testing and demonstration, you can bypass email dispatch and simulate opening the recovery link directly:
-            </p>
-
-            <button
-              type="button"
-              onClick={() => setIsResetting(true)}
-              className="w-full py-2.5 rounded-xl bg-[#090D16] hover:bg-[#1E293B] border border-[#1E293B] text-[#F1F5F9] text-xs font-medium transition-colors"
-            >
-              ⚡ Simulate Opening Reset Email Link
-            </button>
-
-            <div className="pt-2">
-              <button
-                type="button"
-                onClick={() => onNavigate('login')}
-                className="text-xs text-[#94A3B8] hover:text-white"
-              >
-                ← Return to Login
-              </button>
-            </div>
-          </div>
-        ) : (
-          <form onSubmit={handleSendLink} className="space-y-4">
-            <div>
-              <label className="block text-xs font-medium text-[#94A3B8] mb-1">Creator Account Email</label>
-              <div className="relative">
-                <Mail className="w-4 h-4 text-[#94A3B8]/60 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                <input
-                  type="email"
-                  required
-                  placeholder="marcus@channel.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full bg-[#090D16] border border-[#1E293B] rounded-xl pl-10 pr-3.5 py-2.5 text-xs text-[#F1F5F9] placeholder-[#94A3B8]/50 focus:outline-none focus:border-[#E11D48]"
-                />
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              className="w-full py-3 rounded-full bg-gradient-to-r from-[#E11D48] to-rose-600 hover:from-rose-600 hover:to-rose-500 text-white font-semibold text-xs transition-all shadow-[0_4px_16px_rgba(225,29,72,0.4)] flex items-center justify-center gap-1.5 uppercase tracking-wider active:scale-95"
-            >
-              <span>Send Recovery Link</span>
-              <ArrowRight className="w-3.5 h-3.5" />
-            </button>
-
-            <div className="text-center pt-4 border-t border-[#1E293B] text-xs text-[#94A3B8]">
-              Remembered your credentials?{' '}
-              <button
-                type="button"
-                onClick={() => onNavigate('login')}
-                className="text-[#E11D48] font-semibold hover:underline"
-              >
-                Back to Sign in
-              </button>
-            </div>
-          </form>
-        )}
-      </div>
-    </div>
-  );
+  return <div className="auth-shell">
+    <div className="auth-backdrop auth-backdrop-one" /><div className="auth-backdrop auth-backdrop-two" />
+    <button className="auth-logo" onClick={() => onNavigate('home')}><span>✳</span> VALLU</button>
+    <section className="recovery-card">
+      <div className="recovery-icon"><KeyRound size={19} /></div>
+      <span className="auth-card-eyebrow">ACCOUNT SECURITY</span>
+      <h1>{mode === 'update' ? 'Choose a new password.' : mode === 'done' ? 'Password updated.' : 'Get back in.'}</h1>
+      <p>{mode === 'request' ? 'Enter the email linked to your creator account. We’ll send a secure recovery link.' : mode === 'sent' ? 'Check your inbox for the password reset email. Open that link on this device to continue.' : mode === 'update' ? 'Choose a new password for your VALLU account.' : 'Your password has been updated. Sign in with your new password.'}</p>
+      {mode === 'request' && <form onSubmit={sendLink} className="auth-form">
+        <label><span>EMAIL ADDRESS</span><div className="auth-input-wrap"><Mail size={15} /><input type="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" /></div></label>
+        <button className="auth-submit" type="submit" disabled={loading}>{loading ? 'Sending link…' : <>Send recovery link <ArrowUpRight size={15} /></>}</button>
+      </form>}
+      {mode === 'sent' && <div className="recovery-sent"><CheckCircle2 size={18} /><span>Recovery instructions requested for <b>{email}</b>.</span></div>}
+      {mode === 'update' && <form onSubmit={updatePassword} className="auth-form">
+        <label><span>NEW PASSWORD</span><div className="auth-input-wrap"><KeyRound size={15} /><input type="password" required minLength={8} autoComplete="new-password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} placeholder="At least 8 characters" /></div></label>
+        <button className="auth-submit" type="submit" disabled={loading}>{loading ? 'Updating…' : <>Update password <ArrowUpRight size={15} /></>}</button>
+      </form>}
+      {mode === 'done' && <div className="recovery-sent"><ShieldCheck size={18} /><span>Your credentials are updated. Your private workspace still requires sign in.</span></div>}
+      {error && <div className="auth-feedback auth-error" role="alert">{error}</div>}
+      <button className="recovery-back" onClick={() => onNavigate('login')}><ArrowLeft size={13} /> Back to log in</button>
+    </section>
+  </div>;
 };
