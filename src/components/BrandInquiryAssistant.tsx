@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { trackCreatorEvent } from '../lib/analytics';
-import { ArrowLeft, ArrowRight, Check, LoaderCircle, MessageCircle, Send, ShieldCheck, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, Info, LoaderCircle, MessageCircle, Send, ShieldCheck, X } from 'lucide-react';
 
 interface Props { creatorName:string; handle:string; onClose:()=>void; }
 type Answers={
@@ -43,6 +43,7 @@ export const BrandInquiryAssistant:React.FC<Props>=({creatorName,handle,onClose}
   const [loading,setLoading]=useState(false);
   const [submitted,setSubmitted]=useState(false);
   const [error,setError]=useState('');
+  const [showDisclosure,setShowDisclosure]=useState(false);
   const activeStep=steps[stepIndex];
 
   useEffect(()=>{void trackCreatorEvent(handle,'inquiry_start')},[handle]);
@@ -94,7 +95,12 @@ export const BrandInquiryAssistant:React.FC<Props>=({creatorName,handle,onClose}
   const submit=async()=>{
     if(!supabase){setError('The enquiry service is not configured. Please try again later.');return;}
     setLoading(true);setError('');
-    const nextLines=[...lines,{sender:'brand' as const,body:'Submitted the campaign details.'}];
+    const finalAnswer=String(currentAnswer||'').trim();
+    const nextLines=[
+      ...lines,
+      ...(finalAnswer?[{sender:'brand' as const,body:finalAnswer}]:[]),
+      {sender:'brand' as const,body:'Submitted the campaign details.'},
+    ];
     try{
       const {data,error:invokeError}=await supabase.functions.invoke('brand-inquiry',{
         body:{
@@ -139,8 +145,20 @@ export const BrandInquiryAssistant:React.FC<Props>=({creatorName,handle,onClose}
     <section role="dialog" aria-modal="true" aria-label={`Collaboration enquiry for ${creatorName}`} className="flex max-h-[92vh] w-full max-w-[540px] flex-col overflow-hidden rounded-[24px] border border-white/[0.12] bg-[#141519] shadow-[0_35px_100px_rgba(0,0,0,.6)]">
       <header className="flex items-center justify-between border-b border-white/[0.08] px-4 py-4 sm:px-5">
         <div className="flex items-center gap-3"><div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#F0443E] text-white"><MessageCircle size={16}/></div><div><p className="text-[11px] font-semibold">Collaboration assistant</p><p className="mt-0.5 flex items-center gap-1.5 text-[9px] text-[#7C7D84]"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400"/> {creatorName} · Public enquiry</p></div></div>
-        <button onClick={onClose} disabled={loading} aria-label="Close assistant" className="flex h-8 w-8 items-center justify-center rounded-full border border-white/10 text-[#8E8F96] hover:text-white"><X size={14}/></button>
+        <div className="flex items-center gap-1.5">
+          <button onClick={()=>setShowDisclosure(value=>!value)} aria-label="About this assistant" aria-expanded={showDisclosure} className={`flex h-8 w-8 items-center justify-center rounded-full border text-[#8E8F96] hover:text-white ${showDisclosure?'border-[#F0443E]/50 bg-[#F0443E]/10':'border-white/10'}`}><Info size={14}/></button>
+          <button onClick={onClose} disabled={loading} aria-label="Close assistant" className="flex h-8 w-8 items-center justify-center rounded-full border border-white/10 text-[#8E8F96] hover:text-white"><X size={14}/></button>
+        </div>
       </header>
+      {showDisclosure&&<aside className="border-b border-white/[0.08] bg-[#1A1B20] px-4 py-4 sm:px-5" role="note">
+        <p className="text-[10px] font-semibold text-white">About this assistant</p>
+        <p className="mt-2 text-[9px] leading-relaxed text-[#A8A9AF]">This is a guided automated assistant that collects collaboration details under the creator’s rules. It can misunderstand information or make mistakes. It cannot accept a deal for the creator; the creator makes the final decision.</p>
+        <p className="mt-2 text-[9px] leading-relaxed text-[#A8A9AF]">This conversation is stored and can be read by the creator. Do not share passwords, payment credentials or other sensitive information.</p>
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <a href="/legal" target="_blank" rel="noreferrer" className="text-[9px] text-[#FF963F] underline underline-offset-2">Privacy information</a>
+          <button type="button" onClick={()=>{onClose();window.setTimeout(()=>document.getElementById('connect')?.scrollIntoView({behavior:'smooth'}),80);}} className="text-[9px] text-[#C8C8CB] underline underline-offset-2">View creator’s public links</button>
+        </div>
+      </aside>}
       <div className="h-1 bg-white/[0.05]"><div className="h-full bg-[#F0443E] transition-all duration-500" style={{width:`${submitted?100:progress}%`}}/></div>
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-5 sm:px-5">
         {lines.map((line,i)=><div key={i} className={`flex ${line.sender==='brand'?'justify-end':'justify-start'}`}><div className={`max-w-[88%] rounded-2xl px-3.5 py-3 ${line.sender==='brand'?'rounded-tr-md bg-[#F0443E] text-white':'rounded-tl-md border border-white/[0.07] bg-white/[0.045] text-[#E8E7E5]'}`}><p className="whitespace-pre-wrap text-[10px] leading-relaxed">{line.body}</p></div></div>)}
