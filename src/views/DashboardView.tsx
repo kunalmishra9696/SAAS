@@ -154,7 +154,7 @@ export const DashboardView:React.FC<Props>=({onNavigate})=>{
       <div className="mt-7 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {[
           {label:'Page views',value:pageViews.toLocaleString(),hint:'Recorded page visits',icon:Eye,color:'text-[#FF963F]'},
-          {label:'Unique visitors',value:unique.toLocaleString(),hint:'Privacy-friendly estimate',icon:Globe,color:'text-[#F0443E]'},
+          {label:'Unique sessions',value:unique.toLocaleString(),hint:'Session-based estimate',icon:Globe,color:'text-[#F0443E]'},
           {label:'Visible offers',value:String(visible.length),hint:'Awaiting your decision',icon:Inbox,color:'text-[#FF963F]'},
           {label:'Accepted value',value:money(acceptedRevenue,currency),hint:'Across accepted deals',icon:TrendingUp,color:'text-emerald-300'},
         ].map(item=>{const Icon=item.icon;return <div key={item.label} className="rounded-2xl border border-white/[0.09] bg-[#141519] p-5"><div className="flex items-center justify-between"><span className="text-[10px] text-[#909198]">{item.label}</span><Icon size={15} className={item.color}/></div><p className="mt-5 font-display text-3xl font-semibold tracking-[-.05em]">{item.value}</p><p className="mt-1 text-[9px] text-[#6F7076]">{item.hint}</p></div>})}
