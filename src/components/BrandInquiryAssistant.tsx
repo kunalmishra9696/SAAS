@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
+import { trackCreatorEvent } from '../lib/analytics';
 import { ArrowLeft, ArrowRight, Check, LoaderCircle, MessageCircle, Send, ShieldCheck, X } from 'lucide-react';
 
 interface Props { creatorName:string; handle:string; onClose:()=>void; }
@@ -43,6 +44,8 @@ export const BrandInquiryAssistant:React.FC<Props>=({creatorName,handle,onClose}
   const [submitted,setSubmitted]=useState(false);
   const [error,setError]=useState('');
   const activeStep=steps[stepIndex];
+
+  useEffect(()=>{void trackCreatorEvent(handle,'inquiry_start')},[handle]);
   const progress=Math.round((stepIndex/steps.length)*100);
   const update=<K extends keyof Answers>(key:K,value:Answers[K])=>setAnswers(prev=>({...prev,[key]:value}));
   const toggleDeliverable=(value:string)=>update('deliverables',answers.deliverables.includes(value)?answers.deliverables.filter(item=>item!==value):[...answers.deliverables,value]);
@@ -107,6 +110,7 @@ export const BrandInquiryAssistant:React.FC<Props>=({creatorName,handle,onClose}
       if(data?.error)throw new Error(data.error);
       setLines([...nextLines,{sender:'assistant',body:data?.message||'Your enquiry has been received. The creator will review the proposal. You can close this window now.'}]);
       setSubmitted(true);
+      void trackCreatorEvent(handle,'inquiry_complete');
     }catch(e){
       setError(e instanceof Error?e.message:'We could not send your enquiry. Please try again.');
     }finally{setLoading(false);}
