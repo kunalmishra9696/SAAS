@@ -20,7 +20,7 @@ export const PublicLandingView:React.FC<Props>=({onNavigate})=>{
     const load=async()=>{
       if(!supabase||!handle){setNotFound(true);setLoading(false);return;}
       try{
-        const {data,error}=await supabase.from('creator_pages').select('handle,page_data,theme').eq('handle',handle).eq('status','published').maybeSingle();
+        const {data,error}=await supabase.from('creator_pages').select('handle,published_data,published_theme').eq('handle',handle).eq('status','published').maybeSingle();
         if(error)throw error;
         if(active){if(data){setPage(data);void trackCreatorEvent(handle,'page_view');}else setNotFound(true);}
       }catch{if(active)setNotFound(true);}
@@ -32,5 +32,5 @@ export const PublicLandingView:React.FC<Props>=({onNavigate})=>{
 
   if(loading)return <main className="flex min-h-screen items-center justify-center bg-[#090A0D] text-xs text-[#A3A4AA]"><LoaderCircle className="mr-3 animate-spin" size={16}/>Loading creator page…</main>;
   if(notFound||!page)return <main className="flex min-h-screen items-center justify-center bg-[#090A0D] px-6 text-center text-white"><div><div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-white/5"><Search size={18} className="text-[#F0443E]"/></div><h1 className="mt-5 font-display text-3xl font-semibold">This page isn't available.</h1><p className="mt-2 max-w-sm text-[11px] leading-relaxed text-[#8F9096]">The link may be incorrect, or the creator has not published this page.</p><button onClick={()=>onNavigate('home')} className="site-button site-button-secondary mt-7"><ArrowLeft size={13}/> Back to VALLU</button></div></main>;
-  return <CreatorPortfolioPage pageData={{...page.page_data,visual_style:page.theme?.visual_style||page.page_data.visual_style,writing_tone:page.theme?.writing_tone||page.page_data.writing_tone}} handle={page.handle}/>;
+  return <CreatorPortfolioPage pageData={{...page.published_data,visual_style:page.published_theme?.visual_style||page.published_data?.visual_style,writing_tone:page.published_theme?.writing_tone||page.published_data?.writing_tone}} handle={page.handle}/>;
 };
