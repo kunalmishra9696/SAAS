@@ -97,6 +97,31 @@ export const OnboardingView: React.FC<Props> = ({onNavigate}) => {
         if(pageRes.error)throw pageRes.error;
         if(settingsRes.error)throw settingsRes.error;
         if(!active)return;
+
+        // Email-confirmation signups can reach onboarding without having had a
+        // client session during sign-up. Make sure their private rows exist now.
+        const initialName=String(profileRes.data?.display_name||user.user_metadata?.display_name||user.email?.split('@')[0]||'Creator').trim();
+        const initialHandle=String(pageRes.data?.handle||user.user_metadata?.handle||initialName.toLowerCase().replace(/[^a-z0-9]+/g,'-')).toLowerCase().replace(/[^a-z0-9_-]/g,'').slice(0,30);
+        if(!profileRes.data){
+          const {error}=await supabase.from('creator_profiles').upsert({
+            id:user.id,display_name:initialName,email:user.email||'',onboarding_completed:false
+          },{onConflict:'id'});
+          if(error)throw error;
+        }
+        if(!settingsRes.data){
+          const {error}=await supabase.from('creator_settings').upsert({
+            creator_id:user.id,currency:'INR',target_rate:0,minimum_rate:0,allowed_compensation:['cash']
+          },{onConflict:'creator_id'});
+          if(error)throw error;
+        }
+        if(!pageRes.data){
+          if(initialHandle.length<3)throw new Error('Your signup handle is invalid. Please contact support so we can reserve a new one.');
+          const {error}=await supabase.from('creator_pages').upsert({
+            creator_id:user.id,handle:initialHandle,status:'draft',page_data:{display_name:initialName}
+          },{onConflict:'creator_id'});
+          if(error)throw error;
+        }
+
         const page=(pageRes.data?.page_data||{}) as Record<string,any>;
         const audience=(page.audience||{}) as Record<string,any>;
         const platforms=(page.platforms||[]) as {platform:string;url:string;followers?:string|null}[];
