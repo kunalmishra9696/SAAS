@@ -1,542 +1,198 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { PageRoute } from '../types';
-import { useCreatorStore, InboundDeal } from '../store/creatorStore';
+import { InboundDeal, useCreatorStore } from '../store/creatorStore';
+import { supabase } from '../lib/supabase';
 import {
-  DollarSign,
-  TrendingUp,
-  ShieldCheck,
-  CheckCircle2,
-  Clock,
-  AlertTriangle,
-  ArrowRight,
-  ExternalLink,
-  Eye,
-  XCircle,
-  FileText,
-  Sliders,
-  Globe,
-  Plus,
-  Share2,
-  Check,
+  ArrowUpRight, BarChart3, Check, CheckCircle2, Clock3, Copy, Eye,
+  FileText, Globe2, LayoutDashboard, LockKeyhole, LogOut, MessageSquare,
+  MoreHorizontal, Pause, ShieldCheck, Sparkles, TrendingUp, X, XCircle
 } from 'lucide-react';
 
-interface DashboardViewProps {
-  onNavigate: (route: PageRoute) => void;
-}
+interface DashboardViewProps { onNavigate: (route: PageRoute) => void; }
+type InboxTab = 'visible' | 'hidden' | 'unfinished' | 'on_hold' | 'accepted' | 'declined';
+
+const tabLabels: { id: InboxTab; label: string }[] = [
+  { id: 'visible', label: 'Visible' }, { id: 'hidden', label: 'Hidden' },
+  { id: 'unfinished', label: 'Unfinished' }, { id: 'on_hold', label: 'On hold' },
+  { id: 'accepted', label: 'Accepted' }, { id: 'declined', label: 'Declined' },
+];
+
+const currency = (amount: number, code: string) => new Intl.NumberFormat('en-IN', {
+  style: 'currency', currency: code, maximumFractionDigits: 0,
+}).format(amount);
 
 export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
-  const {
-    creator,
-    deals,
-    updateDealStatus,
-    publishLandingPage,
-    saveDraftLandingPage,
-    updateCreator,
-    addProposal,
-  } = useCreatorStore();
+  const { creator, deals, isLoading, error: storeError, updateCreator, updateDealStatus, refresh } = useCreatorStore();
+  const [tab, setTab] = useState<InboxTab>('visible');
+  const [selected, setSelected] = useState<InboundDeal | null>(null);
+  const [editingRates, setEditingRates] = useState(false);
+  const [target, setTarget] = useState('');
+  const [minimum, setMinimum] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [actionError, setActionError] = useState('');
+  const [copied, setCopied] = useState(false);
+  const [analytics, setAnalytics] = useState<{ day: string; page_views: number; unique_visitors: number; link_clicks: number; inquiry_starts: number; completed_inquiries: number }[]>([]);
+  const [analyticsLoading, setAnalyticsLoading] = useState(true);
 
-  const [activeTab, setActiveTab] = useState<'visible' | 'on_hold' | 'accepted' | 'declined'>('visible');
-  const [selectedDeal, setSelectedDeal] = useState<InboundDeal | null>(null);
-  const [isEditingRates, setIsEditingRates] = useState(false);
-  const [tempTarget, setTempTarget] = useState(creator.startingRate);
-  const [tempFloor, setTempFloor] = useState(creator.floorRate);
-  const [copiedLink, setCopiedLink] = useState(false);
+  useEffect(() => {
+    setTarget(creator.startingRate ? String(creator.startingRate) : '');
+    setMinimum(creator.floorRate ? String(creator.floorRate) : '');
+  }, [creator.startingRate, creator.floorRate]);
 
-  // Dynamic Pipeline Metric Calculations
-  const visibleDeals = deals.filter((d) => d.status === 'visible');
-  const onHoldDeals = deals.filter((d) => d.status === 'on_hold');
-  const acceptedDeals = deals.filter((d) => d.status === 'accepted');
-  const declinedDeals = deals.filter((d) => d.status === 'declined');
+  useEffect(() => {
+    let active = true;
+    const loadAnalytics = async () => {
+      if (!supabase) { setAnalyticsLoading(false); return; }
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { setAnalyticsLoading(false); return; }
+      const from = new Date(); from.setDate(from.getDate() - 29);
+      const { data, error } = await supabase.from('analytics_daily')
+        .select('day,page_views,unique_visitors,link_clicks,inquiry_starts,completed_inquiries')
+        .eq('creator_id', user.id)
+        .gte('day', from.toISOString().slice(0, 10))
+        .order('day', { ascending: true });
+      if (!active) return;
+      if (!error) setAnalytics((data || []) as typeof analytics);
+      setAnalyticsLoading(false);
+    };
+    void loadAnalytics();
+    return () => { active = false; };
+  }, []);
 
-  const activePipelineValue = visibleDeals.reduce((sum, d) => sum + d.offeredBudget, 0);
-  const acceptedEarningsValue = acceptedDeals.reduce((sum, d) => sum + d.offeredBudget, 0);
+  const totals = useMemo(() => analytics.reduce((sum, day) => ({
+    views: sum.views + day.page_views,
+    visitors: sum.visitors + day.unique_visitors,
+    clicks: sum.clicks + day.link_clicks,
+    starts: sum.starts + day.inquiry_starts,
+    completed: sum.completed + day.completed_inquiries,
+  }), { views: 0, visitors: 0, clicks: 0, starts: 0, completed: 0 }), [analytics]);
 
-  const avgDealValue = deals.length > 0
-    ? Math.round(deals.reduce((sum, d) => sum + d.offeredBudget, 0) / deals.length)
-    : creator.startingRate;
+  const visible = deals.filter((deal) => deal.status === 'visible');
+  const accepted = deals.filter((deal) => deal.status === 'accepted');
+  const activeDeals = deals.filter((deal) => ['visible', 'hidden', 'on_hold'].includes(deal.status));
+  const pipelineValue = visible.reduce((sum, deal) => sum + (deal.currency === creator.currency ? deal.offeredBudget : 0), 0);
+  const currentDeals = deals.filter((deal) => deal.status === tab);
+  const peakViews = Math.max(1, ...analytics.map((day) => day.page_views));
 
-  const currentTabDeals = deals.filter((d) => d.status === activeTab);
-
-  const handleCopyPublicLink = () => {
-    navigator.clipboard.writeText(`https://vallu.bio/@${creator.handle}`);
-    setCopiedLink(true);
-    setTimeout(() => setCopiedLink(false), 2000);
+  const publicUrl = `${window.location.origin}/c/${creator.handle}`;
+  const handleCopyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(publicUrl);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1800);
+    } catch {
+      setActionError('Copying was blocked by your browser. Copy the link from the address field instead.');
+    }
   };
 
-  const handleSaveRates = () => {
-    updateCreator({
-      startingRate: Number(tempTarget),
-      floorRate: Number(tempFloor),
-    });
-    setIsEditingRates(false);
+  const saveRates = async () => {
+    setSaving(true); setActionError('');
+    try {
+      await updateCreator({ startingRate: Number(target) || 0, floorRate: Number(minimum) || 0 });
+      setEditingRates(false);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Rates could not be saved.');
+    } finally { setSaving(false); }
   };
 
-  const handleSimulateNewInquiry = () => {
-    const brands = ['Figma', 'Vercel', 'Raycast', 'OpenAI', 'Arc Browser'];
-    const randomBrand = brands[Math.floor(Math.random() * brands.length)];
-    const randomBudget = Math.round((creator.floorRate + Math.random() * 2500) / 100) * 100;
-
-    addProposal({
-      brandName: randomBrand,
-      brandEmail: `partnerships@${randomBrand.toLowerCase().replace(' ', '')}.com`,
-      campaignName: `${randomBrand} Q3 Creator Feature`,
-      deliverable: '1x Dedicated Video + X Thread Breakdown',
-      offeredBudget: randomBudget,
-      dealScore: randomBudget >= creator.startingRate ? 94 : 82,
-      redFlags: [],
-      paymentWindow: 'Net-15',
-      usageRights: '60-day digital organic',
-      transcript: [
-        { sender: 'brand', text: `Hi ${creator.name}, we'd love to partner on our upcoming release with a budget of $${randomBudget.toLocaleString()}.`, time: 'Just now' },
-        { sender: 'assistant', text: `Offer passed the autonomous rate screen ($${randomBudget.toLocaleString()}) and has been delivered to ${creator.name}'s inbox.`, time: 'Just now' },
-      ],
-    });
+  const changeStatus = async (deal: InboundDeal, status: InboundDeal['status']) => {
+    setSaving(true); setActionError('');
+    try {
+      await updateDealStatus(deal.id, status);
+      setSelected(null);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'The offer could not be updated.');
+    } finally { setSaving(false); }
   };
 
-  return (
-    <div className="pt-24 sm:pt-28 pb-24 px-4 sm:px-6 max-w-6xl mx-auto space-y-8 animate-in fade-in duration-300">
-      {/* 1. Creator Top Bar & Bio Publication State */}
-      <div className="bg-[#131926] border border-[#1E293B] rounded-3xl p-6 sm:p-7 flex flex-col md:flex-row items-start md:items-center justify-between gap-6 shadow-[0_20px_50px_rgba(9,13,22,0.9)]">
-        <div className="flex items-center gap-4">
-          <div className="relative">
-            <img
-              src={creator.avatarUrl}
-              alt={creator.name}
-              className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl object-cover border-2 border-[#1E293B]"
-            />
-            <span className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-emerald-400 border-2 border-[#131926]" />
-          </div>
+  const currencyCode = creator.currency || 'INR';
 
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-xl sm:text-2xl font-bold font-display text-white">
-                {creator.name}
-              </h1>
-              <span className="text-xs font-mono text-[#94A3B8] bg-[#090D16] px-2.5 py-0.5 rounded-full border border-[#1E293B]">
-                vallu.bio/@{creator.handle}
-              </span>
-            </div>
-
-            <div className="flex items-center gap-3 mt-1.5 text-xs text-[#94A3B8]">
-              {creator.isPublished ? (
-                <span className="flex items-center gap-1.5 text-emerald-400 font-medium">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                  Live on vallu.bio/@{creator.handle}
-                </span>
-              ) : (
-                <span className="flex items-center gap-1.5 text-amber-400 font-medium">
-                  <span className="w-2 h-2 rounded-full bg-amber-400" />
-                  Page Draft Saved (Unpublished)
-                </span>
-              )}
-              <span>·</span>
-              <span>{creator.followersTotal} Audience</span>
-              <span>·</span>
-              <span className="text-white font-mono font-semibold">0% Commission Active</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Public Link & Publication Action Buttons */}
-        <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto">
-          {creator.isPublished ? (
-            <>
-              <button
-                onClick={handleCopyPublicLink}
-                className="flex-1 sm:flex-none py-2 px-3.5 rounded-xl bg-[#090D16] border border-[#1E293B] hover:border-slate-500 text-xs text-slate-300 hover:text-white transition-colors flex items-center justify-center gap-1.5"
-              >
-                {copiedLink ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Share2 className="w-3.5 h-3.5 text-[#E11D48]" />}
-                <span>{copiedLink ? 'Link Copied!' : 'Copy Bio Link'}</span>
-              </button>
-
-              <button
-                onClick={() => onNavigate('public-landing')}
-                className="flex-1 sm:flex-none py-2 px-4 rounded-xl bg-[#1E293B] hover:bg-slate-700 text-xs font-semibold text-white transition-colors flex items-center justify-center gap-1.5"
-              >
-                <span>View Live Bio</span>
-                <ExternalLink className="w-3.5 h-3.5" />
-              </button>
-            </>
-          ) : (
-            <button
-              onClick={publishLandingPage}
-              className="w-full sm:w-auto py-2.5 px-5 rounded-xl bg-gradient-to-r from-[#E11D48] to-rose-600 hover:from-rose-600 hover:to-rose-500 text-white font-bold text-xs shadow-md transition-all flex items-center justify-center gap-2"
-            >
-              <Globe className="w-3.5 h-3.5" />
-              <span>Publish Bio Page Now</span>
-            </button>
-          )}
-
-          <button
-            onClick={() => onNavigate('landing-preview')}
-            className="flex-1 sm:flex-none py-2 px-3.5 rounded-xl bg-[#090D16] border border-[#1E293B] text-xs text-[#94A3B8] hover:text-white hover:bg-[#1E293B] transition-colors"
-          >
-            Customize Template
-          </button>
-        </div>
+  return <div className="dashboard-shell">
+    <aside className="dashboard-sidebar">
+      <button className="dashboard-wordmark" onClick={() => onNavigate('home')}><span>✳</span> VALLU</button>
+      <div className="dashboard-profile"><div className="dashboard-avatar">{creator.name ? creator.name.slice(0, 1).toUpperCase() : 'C'}</div><span><b>{creator.name || 'Creator'}</b><small>Creator workspace</small></span><MoreHorizontal size={16} /></div>
+      <div className="dashboard-nav-label">WORKSPACE</div>
+      <div className="dashboard-nav-item active"><LayoutDashboard size={15} /> Overview</div>
+      <button className="dashboard-nav-item" onClick={() => { setTab('visible'); document.getElementById('offers')?.scrollIntoView({ behavior: 'smooth' }); }}><MessageSquare size={15} /> Brand enquiries <span>{deals.filter((deal) => ['visible', 'hidden', 'unfinished'].includes(deal.status)).length}</span></button>
+      <button className="dashboard-nav-item" onClick={() => onNavigate('landing-preview')}><Globe2 size={15} /> Public page <ArrowUpRight size={12} /></button>
+      <button className="dashboard-nav-item" onClick={() => setEditingRates(true)}><LockKeyhole size={15} /> Private rate rules</button>
+      <div className="dashboard-sidebar-bottom">
+        <div className="dashboard-sidebar-note"><ShieldCheck size={14} /><span>Your rules stay private.<small>Every deal needs your approval.</small></span></div>
+        <button className="dashboard-nav-item" onClick={async () => { await supabase?.auth.signOut(); onNavigate('login'); }}><LogOut size={15} /> Sign out</button>
       </div>
+    </aside>
 
-      {/* 2. Dynamic Real-Time Metric Tiles */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Metric 1: Active Deal Pipeline */}
-        <div className="bg-[#131926] border border-[#1E293B] rounded-2xl p-4 sm:p-5">
-          <span className="text-[11px] font-mono text-[#94A3B8] uppercase block mb-1">
-            Active Deal Pipeline
-          </span>
-          <div className="text-xl sm:text-2xl font-bold font-mono text-white">
-            ${activePipelineValue.toLocaleString()} <span className="text-xs font-normal text-[#94A3B8]">USD</span>
-          </div>
-          <div className="flex items-center gap-1 text-[11px] text-emerald-400 font-mono mt-1">
-            <TrendingUp className="w-3 h-3" />
-            <span>{visibleDeals.length} active inbounds</span>
-          </div>
+    <main className="dashboard-main">
+      <div className="dashboard-mobile-head"><span>✳ VALLU</span><button onClick={async () => { await supabase?.auth.signOut(); onNavigate('login'); }}><LogOut size={15} /></button></div>
+      <div className="dashboard-topline"><div><span>YOUR CREATOR WORKSPACE</span><div className="dashboard-live-indicator"><i /> PRIVATE SESSION</div></div><button className="dashboard-quiet-button" onClick={() => void refresh()}>Refresh data</button></div>
+
+      <header className="dashboard-heading">
+        <div><small>OVERVIEW / TODAY</small><h1>Good to see you{creator.name ? `, ${creator.name.split(' ')[0]}.` : '.'}</h1><p>Your creator page and brand conversations, in one place.</p></div>
+        <div className="dashboard-page-state"><span className={creator.isPublished ? 'published' : ''} />{creator.isPublished ? 'PAGE PUBLISHED' : 'PAGE IN DRAFT'}<button onClick={() => onNavigate('landing-preview')}>{creator.isPublished ? 'View page' : 'Finish page'} <ArrowUpRight size={13} /></button></div>
+      </header>
+
+      {(storeError || actionError) && <div className="dashboard-alert"><XCircle size={15} /> {actionError || storeError}</div>}
+
+      <section className="dashboard-metric-grid">
+        <article className="dashboard-metric"><div><span>PAGE VIEWS</span><Eye size={15} /></div><strong>{analyticsLoading ? '—' : totals.views.toLocaleString('en-IN')}</strong><small>Last 30 days</small></article>
+        <article className="dashboard-metric"><div><span>UNIQUE VISITORS*</span><TrendingUp size={15} /></div><strong>{analyticsLoading ? '—' : totals.visitors.toLocaleString('en-IN')}</strong><small>Privacy-friendly estimate</small></article>
+        <article className="dashboard-metric"><div><span>INQUIRY STARTS</span><MessageSquare size={15} /></div><strong>{analyticsLoading ? '—' : totals.starts.toLocaleString('en-IN')}</strong><small>{totals.completed} completed</small></article>
+        <article className="dashboard-metric"><div><span>ACTIVE OFFERS</span><FileText size={15} /></div><strong>{deals.filter((deal) => ['visible', 'hidden', 'on_hold'].includes(deal.status)).length.toString().padStart(2, '0')}</strong><small>{visible.length} ready for review</small></article>
+      </section>
+
+      <section className="dashboard-analytics-panel">
+        <div className="dashboard-section-head"><div><span>PAGE PERFORMANCE</span><h2>Visitors over time</h2></div><div className="analytics-period">LAST 30 DAYS</div></div>
+        {analyticsLoading ? <div className="dashboard-chart-empty">Loading your analytics…</div> : analytics.length === 0 || totals.views === 0
+          ? <div className="dashboard-chart-empty"><BarChart3 size={22} /><b>Your page analytics will appear here.</b><span>Publish your page and share its link to start recording views.</span></div>
+          : <div className="dashboard-bar-chart" aria-label="Page views per day for the last thirty days">{analytics.map((day) => <div className="dashboard-bar-column" key={day.day} title={`${day.day}: ${day.page_views} views`}><span style={{ height: `${Math.max(3, day.page_views / peakViews * 100)}%` }} /><small>{new Date(day.day).getDate()}</small></div>)}</div>}
+        <div className="dashboard-chart-foot"><span>*Unique visitor counts are privacy-friendly daily estimates, not cross-site tracking.</span><span><i /> Page views</span></div>
+      </section>
+
+      <section className="dashboard-offers" id="offers">
+        <div className="dashboard-section-head"><div><span>THE INBOX</span><h2>Brand enquiries</h2></div><span className="dashboard-count">{deals.length} TOTAL</span></div>
+        <div className="dashboard-tabs">{tabLabels.map((item) => <button key={item.id} className={tab === item.id ? 'active' : ''} onClick={() => setTab(item.id)}>{item.label}<span>{deals.filter((deal) => deal.status === item.id).length}</span></button>)}</div>
+        {isLoading ? <div className="dashboard-empty">Loading your enquiries…</div> : currentDeals.length === 0
+          ? <div className="dashboard-empty"><div className="dashboard-empty-icon"><MessageSquare size={19} /></div><b>{tab === 'visible' ? 'No offers need your attention.' : `No ${tab.replace('_', ' ')} enquiries.`}</b><p>{tab === 'visible' ? 'When a brand completes an enquiry on your published page, it will appear here.' : 'This section will fill when there is something to review.'}</p></div>
+          : <div className="dashboard-offer-list">{currentDeals.map((deal) => <button className="dashboard-offer-row" key={deal.id} onClick={() => setSelected(deal)}>
+              <span className="dashboard-brand-square">{deal.brandName.slice(0, 1).toUpperCase()}</span>
+              <span className="dashboard-offer-main"><b>{deal.brandName}</b><small>{deal.campaignName || 'Collaboration enquiry'} · {new Date(deal.submittedAt).toLocaleDateString()}</small></span>
+              <span className="dashboard-offer-value">{currency(deal.offeredBudget, deal.currency)}<small>{deal.deliverable}</small></span>
+              <span className={`dashboard-offer-score ${deal.dealScore >= 50 ? 'good' : 'low'}`}>{(deal.dealScore / 10).toFixed(1)}<small>/10</small></span>
+              <ArrowUpRight size={15} />
+            </button>)}</div>}
+      </section>
+
+      <section className="dashboard-bottom-grid">
+        <article className="dashboard-settings-card"><div className="dashboard-section-head"><div><span>PRIVATE SETTINGS</span><h2>Your rate boundaries</h2></div><LockKeyhole size={16} /></div>
+          {editingRates ? <div className="dashboard-rate-edit"><label>Target rate <input type="number" min="0" value={target} onChange={(event) => setTarget(event.target.value)} /></label><label>Private minimum <input type="number" min="0" value={minimum} onChange={(event) => setMinimum(event.target.value)} /></label><div><button onClick={() => setEditingRates(false)}>Cancel</button><button onClick={() => void saveRates()} disabled={saving}>{saving ? 'Saving…' : 'Save rates'}</button></div></div>
+          : <><div className="dashboard-rate-values"><div><small>TARGET</small><b>{creator.startingRate ? currency(creator.startingRate, currencyCode) : 'Not set'}</b></div><div><small>PRIVATE MINIMUM</small><b>{creator.floorRate ? currency(creator.floorRate, currencyCode) : 'Not set'}</b></div></div><button className="dashboard-text-link" onClick={() => setEditingRates(true)}>Edit private rate rules <ArrowUpRight size={13} /></button></>}
+        </article>
+        <article className="dashboard-settings-card"><div className="dashboard-section-head"><div><span>YOUR PUBLIC PRESENCE</span><h2>Creator page</h2></div><Globe2 size={16} /></div>
+          <p>{creator.isPublished ? 'Your page is live. Share it with the brands you want to hear from.' : 'Your page is still private. Preview it and publish when you’re ready.'}</p>
+          <div className="dashboard-public-link"><span>{creator.handle ? `${window.location.host}/c/${creator.handle}` : 'Add your public handle'}</span><button onClick={() => creator.handle && void handleCopyLink()} disabled={!creator.isPublished || !creator.handle}><Copy size={13} />{copied ? 'Copied' : 'Copy'}</button></div>
+          <button className="dashboard-text-link" onClick={() => onNavigate('landing-preview')}>Edit and preview page <ArrowUpRight size={13} /></button>
+        </article>
+      </section>
+      <footer className="dashboard-footer"><span>VALLU WORKSPACE</span><span>Private by design · Creator decides</span></footer>
+    </main>
+
+    {selected && <div className="dashboard-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelected(null); }}>
+      <section className="dashboard-deal-modal" role="dialog" aria-modal="true" aria-labelledby="deal-title">
+        <div className="dashboard-modal-head"><div><span>COLLABORATION REVIEW</span><h2 id="deal-title">{selected.brandName}</h2><p>{selected.campaignName || 'Brand enquiry'}</p></div><button onClick={() => setSelected(null)} aria-label="Close offer"><X size={18} /></button></div>
+        <div className="dashboard-deal-scoreline"><div><small>OFFER SCORE</small><strong>{(selected.dealScore / 10).toFixed(1)}<span>/10</span></strong></div><div><small>PROPOSED AMOUNT</small><strong>{currency(selected.offeredBudget, selected.currency)}</strong></div></div>
+        <div className="dashboard-deal-details"><div><small>DELIVERABLES</small><b>{selected.deliverable}</b></div><div><small>USAGE RIGHTS</small><b>{selected.usageRights}</b></div><div><small>PAYMENT TERMS</small><b>{selected.paymentWindow}</b></div><div><small>BRAND CONTACT</small><b>{selected.brandEmail || 'Not provided'}</b></div><div><small>DECISION DEADLINE</small><b>{selected.expiresAt ? new Date(selected.expiresAt).toLocaleString() : 'Not set'}</b></div></div>
+        {selected.redFlags.length > 0 && <div className="dashboard-red-flags"><b>Points to review</b>{selected.redFlags.map((flag) => <span key={flag}><i />{flag}</span>)}</div>}
+        <div className="dashboard-transcript"><div className="dashboard-transcript-head"><span>FULL CONVERSATION</span><small>{selected.transcript.length} MESSAGES</small></div>
+          {selected.transcript.length === 0 ? <p>No transcript was stored for this enquiry.</p> : selected.transcript.map((message, index) => <div className={`dashboard-message ${message.sender === 'brand' ? 'from-brand' : 'from-assistant'}`} key={`${selected.id}-${index}`}><small>{message.sender === 'brand' ? selected.brandName : 'VALLU assistant'} · {message.time}</small>{message.text}</div>)}
         </div>
-
-        {/* Metric 2: Verified Earnings (Accepted) */}
-        <div className="bg-[#131926] border border-[#1E293B] rounded-2xl p-4 sm:p-5">
-          <span className="text-[11px] font-mono text-[#94A3B8] uppercase block mb-1">
-            Accepted Revenue
-          </span>
-          <div className="text-xl sm:text-2xl font-bold font-mono text-emerald-400">
-            ${acceptedEarningsValue.toLocaleString()} <span className="text-xs font-normal text-[#94A3B8]">USD</span>
-          </div>
-          <div className="text-[11px] text-[#94A3B8] font-mono mt-1">
-            {acceptedDeals.length} deals confirmed
-          </div>
+        <div className="dashboard-modal-actions">
+          <button onClick={() => setSelected(null)} className="dashboard-modal-close">Close</button>
+          {selected.status !== 'on_hold' && !['accepted','declined','unfinished'].includes(selected.status) && <button onClick={() => void changeStatus(selected, 'on_hold')} disabled={saving} className="dashboard-modal-hold"><Pause size={13} /> Hold</button>}
+          {!['accepted','declined','unfinished'].includes(selected.status) && <button onClick={() => void changeStatus(selected, 'declined')} disabled={saving} className="dashboard-modal-decline"><XCircle size={13} /> Decline</button>}
+          {!['accepted','declined','unfinished'].includes(selected.status) && <button onClick={() => void changeStatus(selected, 'accepted')} disabled={saving} className="dashboard-modal-accept"><Check size={13} /> Accept proposal</button>}
         </div>
-
-        {/* Metric 3: Starting Target Rate */}
-        <div className="bg-[#131926] border border-[#1E293B] rounded-2xl p-4 sm:p-5">
-          <span className="text-[11px] font-mono text-[#94A3B8] uppercase block mb-1">
-            Public Starting Rate
-          </span>
-          <div className="text-xl sm:text-2xl font-bold font-mono text-white">
-            ${creator.startingRate.toLocaleString()} <span className="text-xs font-normal text-[#94A3B8]">USD</span>
-          </div>
-          <div className="text-[11px] text-slate-400 font-mono mt-1">
-            Avg deal size: ${avgDealValue.toLocaleString()}
-          </div>
-        </div>
-
-        {/* Metric 4: Confidential Floor Rate */}
-        <div className="bg-[#131926] border border-rose-900/40 rounded-2xl p-4 sm:p-5 relative overflow-hidden">
-          <span className="text-[11px] font-mono text-rose-300 uppercase block mb-1 flex items-center gap-1">
-            <ShieldCheck className="w-3.5 h-3.5 text-[#E11D48]" />
-            Rate Floor (Confidential)
-          </span>
-          <div className="text-xl sm:text-2xl font-bold font-mono text-[#E11D48]">
-            ${creator.floorRate.toLocaleString()} <span className="text-xs font-normal text-[#94A3B8]">USD</span>
-          </div>
-          <button
-            onClick={() => setIsEditingRates(!isEditingRates)}
-            className="text-[10px] text-rose-400 underline font-mono mt-1 hover:text-rose-300"
-          >
-            {isEditingRates ? 'Close Editor' : 'Edit Rate Limits'}
-          </button>
-        </div>
-      </div>
-
-      {/* Inline Rate Editor drawer */}
-      {isEditingRates && (
-        <div className="bg-[#131926] border border-[#E11D48]/50 rounded-2xl p-5 animate-in fade-in duration-200">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm font-bold text-white flex items-center gap-2">
-              <Sliders className="w-4 h-4 text-[#E11D48]" />
-              <span>Adjust Commercial Rate Parameters</span>
-            </h3>
-            <span className="text-[11px] text-[#94A3B8]">Instant sync to public landing page</span>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 text-xs">
-            <div>
-              <div className="flex justify-between mb-1">
-                <span className="text-[#94A3B8]">Public Starting Rate</span>
-                <span className="font-mono text-white font-bold">${tempTarget.toLocaleString()}</span>
-              </div>
-              <input
-                type="range"
-                min={1000}
-                max={15000}
-                step={250}
-                value={tempTarget}
-                onChange={(e) => setTempTarget(Number(e.target.value))}
-                className="w-full accent-[#E11D48] cursor-pointer"
-              />
-            </div>
-
-            <div>
-              <div className="flex justify-between mb-1">
-                <span className="text-[#94A3B8]">Confidential Floor Rate (Private)</span>
-                <span className="font-mono text-[#E11D48] font-bold">${tempFloor.toLocaleString()}</span>
-              </div>
-              <input
-                type="range"
-                min={500}
-                max={tempTarget}
-                step={200}
-                value={tempFloor}
-                onChange={(e) => setTempFloor(Number(e.target.value))}
-                className="w-full accent-[#E11D48] cursor-pointer"
-              />
-            </div>
-          </div>
-
-          <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-[#1E293B]">
-            <button
-              onClick={() => setIsEditingRates(false)}
-              className="px-3.5 py-1.5 text-xs text-[#94A3B8] hover:text-white rounded-lg"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleSaveRates}
-              className="px-4 py-1.5 text-xs font-bold text-white bg-[#E11D48] hover:bg-rose-600 rounded-lg transition-colors"
-            >
-              Save Rate Limits
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* 3. Deal Inbox Section with 4 Tabs */}
-      <div className="bg-[#131926] border border-[#1E293B] rounded-3xl p-6 sm:p-8 shadow-xl space-y-6">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div>
-            <h2 className="text-lg font-bold font-display text-white">
-              Sponsor Proposal Inbox
-            </h2>
-            <p className="text-xs text-[#94A3B8] mt-0.5">
-              Screened inbound inquiries from your public bio page.
-            </p>
-          </div>
-
-          {/* Quick Simulation Button */}
-          <button
-            onClick={handleSimulateNewInquiry}
-            className="text-xs font-semibold px-3 py-1.5 rounded-xl bg-[#090D16] border border-[#1E293B] hover:border-[#E11D48] text-rose-300 hover:text-white transition-colors flex items-center gap-1.5 self-stretch sm:self-auto justify-center"
-          >
-            <Plus className="w-3.5 h-3.5 text-[#E11D48]" />
-            <span>Simulate Brand Offer</span>
-          </button>
-        </div>
-
-        {/* 4 Inbox Tabs */}
-        <div className="flex items-center gap-1 border-b border-[#1E293B] pb-2 text-xs font-medium overflow-x-auto">
-          {[
-            { id: 'visible', label: 'Visible Pipeline', count: visibleDeals.length },
-            { id: 'on_hold', label: 'On Hold', count: onHoldDeals.length },
-            { id: 'accepted', label: 'Accepted Deals', count: acceptedDeals.length },
-            { id: 'declined', label: 'Declined', count: declinedDeals.length },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id as any)}
-              className={`py-2 px-3.5 rounded-xl transition-all whitespace-nowrap flex items-center gap-2 ${
-                activeTab === tab.id
-                  ? 'bg-[#1E293B] text-white font-bold shadow-sm'
-                  : 'text-[#94A3B8] hover:text-white hover:bg-[#1E293B]/40'
-              }`}
-            >
-              <span>{tab.label}</span>
-              <span
-                className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full ${
-                  activeTab === tab.id ? 'bg-[#E11D48] text-white' : 'bg-[#090D16] text-[#94A3B8]'
-                }`}
-              >
-                {tab.count}
-              </span>
-            </button>
-          ))}
-        </div>
-
-        {/* Deals List */}
-        {currentTabDeals.length === 0 ? (
-          <div className="py-12 text-center text-xs text-[#94A3B8] space-y-2">
-            <p>No proposals currently in the {activeTab.replace('_', ' ')} queue.</p>
-            <p className="text-[11px] text-slate-500">
-              When brands submit through your public link, proposals automatically populate here.
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {currentTabDeals.map((deal) => {
-              const uplift = deal.offeredBudget - creator.floorRate;
-              return (
-                <div
-                  key={deal.id}
-                  className="bg-[#090D16] border border-[#1E293B] hover:border-slate-600 rounded-2xl p-4 sm:p-5 transition-all flex flex-col md:flex-row items-start md:items-center justify-between gap-4"
-                >
-                  <div className="space-y-1.5 flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-bold text-sm sm:text-base text-white">
-                        {deal.brandName}
-                      </span>
-                      <span className="text-[11px] text-[#94A3B8] font-mono">
-                        {deal.campaignName}
-                      </span>
-                      <span
-                        className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full ${
-                          deal.dealScore >= 80
-                            ? 'bg-emerald-950/40 text-emerald-400 border border-emerald-900/60'
-                            : 'bg-rose-950/40 text-rose-400 border border-rose-900/60'
-                        }`}
-                      >
-                        Score: {deal.dealScore}/100
-                      </span>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-3 text-xs text-[#94A3B8]">
-                      <span className="text-slate-300">{deal.deliverable}</span>
-                      <span>·</span>
-                      <span>{deal.submittedAt}</span>
-                      <span>·</span>
-                      <span className="text-emerald-400 font-mono">
-                        {uplift >= 0 ? `+$${uplift.toLocaleString()} above floor` : `Below floor`}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Financial & Status Action Zone */}
-                  <div className="flex items-center gap-4 w-full md:w-auto justify-between md:justify-end border-t md:border-t-0 pt-3 md:pt-0 border-[#1E293B]">
-                    <div className="text-right">
-                      <span className="text-[10px] text-[#94A3B8] uppercase block font-mono">Offer Amount</span>
-                      <span className="text-lg font-bold font-mono text-emerald-400">
-                        ${deal.offeredBudget.toLocaleString()} <span className="text-xs font-normal">USD</span>
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-1.5">
-                      {activeTab === 'visible' && (
-                        <>
-                          <button
-                            onClick={() => updateDealStatus(deal.id, 'accepted')}
-                            className="p-2 sm:px-3 sm:py-2 rounded-xl bg-[#E11D48] hover:bg-rose-600 text-white font-bold text-xs transition-colors flex items-center gap-1 shadow-sm"
-                            title="Accept Deal & Send Invoice"
-                          >
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            <span className="hidden sm:inline">Accept</span>
-                          </button>
-
-                          <button
-                            onClick={() => updateDealStatus(deal.id, 'on_hold')}
-                            className="p-2 sm:px-2.5 sm:py-2 rounded-xl bg-[#1E293B] hover:bg-slate-700 text-xs text-[#94A3B8] hover:text-white transition-colors"
-                            title="Put On Hold"
-                          >
-                            <Clock className="w-3.5 h-3.5" />
-                          </button>
-
-                          <button
-                            onClick={() => updateDealStatus(deal.id, 'declined')}
-                            className="p-2 sm:px-2.5 sm:py-2 rounded-xl bg-[#1E293B] hover:bg-rose-950/40 text-xs text-rose-400 transition-colors"
-                            title="Decline Deal"
-                          >
-                            <XCircle className="w-3.5 h-3.5" />
-                          </button>
-                        </>
-                      )}
-
-                      {activeTab === 'on_hold' && (
-                        <button
-                          onClick={() => updateDealStatus(deal.id, 'visible')}
-                          className="px-3 py-1.5 rounded-xl bg-[#1E293B] hover:bg-slate-700 text-xs text-white transition-colors"
-                        >
-                          Move to Inbox
-                        </button>
-                      )}
-
-                      <button
-                        onClick={() => setSelectedDeal(deal)}
-                        className="p-2 rounded-xl bg-[#131926] hover:bg-[#1E293B] text-[#94A3B8] hover:text-white transition-colors"
-                        title="Inspect Deal Scope & Transcript"
-                      >
-                        <Eye className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* 4. Deal Inspection Modal */}
-      {selectedDeal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-[#131926] border border-[#1E293B] rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl animate-in zoom-in-95 duration-200">
-            <div className="flex items-center justify-between pb-4 mb-4 border-b border-[#1E293B]">
-              <div>
-                <h3 className="text-base font-bold text-white">{selectedDeal.brandName}</h3>
-                <span className="text-xs text-[#94A3B8] font-mono">{selectedDeal.brandEmail}</span>
-              </div>
-              <span className="text-base font-mono font-bold text-emerald-400">
-                ${selectedDeal.offeredBudget.toLocaleString()} USD
-              </span>
-            </div>
-
-            <div className="space-y-3 text-xs mb-6">
-              <div className="bg-[#090D16] p-3 rounded-xl border border-[#1E293B] space-y-1">
-                <span className="text-[#94A3B8] uppercase text-[10px] font-mono block">Deliverables Scope</span>
-                <p className="text-white font-medium">{selectedDeal.deliverable}</p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-[#090D16] p-3 rounded-xl border border-[#1E293B]">
-                  <span className="text-[#94A3B8] text-[10px] font-mono block">Rights Duration</span>
-                  <span className="text-white">{selectedDeal.usageRights}</span>
-                </div>
-                <div className="bg-[#090D16] p-3 rounded-xl border border-[#1E293B]">
-                  <span className="text-[#94A3B8] text-[10px] font-mono block">Payment Terms</span>
-                  <span className="text-white">{selectedDeal.paymentWindow}</span>
-                </div>
-              </div>
-
-              {/* Negotiation Transcript */}
-              <div className="bg-[#090D16] p-3 rounded-xl border border-[#1E293B] space-y-2">
-                <span className="text-[#94A3B8] text-[10px] font-mono block">Negotiation Log</span>
-                <div className="space-y-1.5 max-h-36 overflow-y-auto">
-                  {selectedDeal.transcript.map((msg, idx) => (
-                    <div
-                      key={idx}
-                      className={`p-2 rounded-lg text-[11px] ${
-                        msg.sender === 'brand'
-                          ? 'bg-[#131926] text-slate-300'
-                          : 'bg-[#E11D48]/15 text-rose-200 border border-rose-500/20'
-                      }`}
-                    >
-                      <span className="text-[9px] font-bold font-mono block text-[#94A3B8]">
-                        {msg.sender === 'brand' ? selectedDeal.brandName : 'VALLU Assistant'} · {msg.time}
-                      </span>
-                      {msg.text}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            <div className="flex gap-2">
-              <button
-                onClick={() => setSelectedDeal(null)}
-                className="flex-1 py-2 text-xs font-semibold text-[#94A3B8] hover:text-white rounded-xl hover:bg-[#090D16] transition-colors"
-              >
-                Close
-              </button>
-
-              {selectedDeal.status !== 'accepted' && (
-                <button
-                  onClick={() => {
-                    updateDealStatus(selectedDeal.id, 'accepted');
-                    setSelectedDeal(null);
-                  }}
-                  className="flex-1 py-2 text-xs font-bold text-white bg-[#E11D48] hover:bg-rose-600 rounded-xl transition-colors shadow-md"
-                >
-                  Accept Deal
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
+        <p className="dashboard-decision-note"><ShieldCheck size={12} /> Accepting creates a deal record. The platform does not collect or transfer the payment.</p>
+      </section>
+    </div>}
+  </div>;
 };
