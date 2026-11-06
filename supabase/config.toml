@@ -1,0 +1,7 @@
+project_id = "cecmtolherzfjtsyrhii"
+
+[functions.brand-inquiry]
+verify_jwt = false
+
+[functions.track-creator-event]
+verify_jwt = false
