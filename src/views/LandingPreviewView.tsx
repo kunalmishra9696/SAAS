@@ -1,131 +1,89 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { PageRoute } from '../types';
-import { useCreatorStore } from '../store/creatorStore';
-import { CreatorLandingTemplate } from '../components/CreatorLandingTemplate';
-import { ArrowLeft, Check, Copy, ExternalLink, Globe, LayoutDashboard, Share2 } from 'lucide-react';
+import { supabase } from '../lib/supabase';
+import { CreatorPortfolioPage } from '../components/CreatorPortfolioPage';
+import { ArrowLeft, Check, Copy, ExternalLink, Globe, LoaderCircle, Save, Share2 } from 'lucide-react';
 
-interface LandingPreviewViewProps {
-  onNavigate: (route: PageRoute) => void;
-}
+interface Props { onNavigate:(route:PageRoute)=>void; }
+type PageRecord={id:string;creator_id:string;handle:string;status:string;page_data:Record<string,any>;theme:Record<string,any>};
 
-export const LandingPreviewView: React.FC<LandingPreviewViewProps> = ({ onNavigate }) => {
-  const { creator, publishLandingPage, saveDraftLandingPage } = useCreatorStore();
-  const [showPublishModal, setShowPublishModal] = useState(false);
-  const [copied, setCopied] = useState(false);
+export const LandingPreviewView:React.FC<Props>=({onNavigate})=>{
+  const [page,setPage]=useState<PageRecord|null>(null);
+  const [loading,setLoading]=useState(true);
+  const [saving,setSaving]=useState(false);
+  const [error,setError]=useState('');
+  const [copied,setCopied]=useState(false);
+  const [published,setPublished]=useState(false);
 
-  const publicUrl = `https://vallu.bio/@${creator.handle}`;
+  useEffect(()=>{
+    let active=true;
+    const load=async()=>{
+      if(!supabase){setError('Supabase is not configured.');setLoading(false);return;}
+      try{
+        const {data:{user},error:authError}=await supabase.auth.getUser();
+        if(authError)throw authError;
+        if(!user)throw new Error('Please log in to preview your page.');
+        const {data,error:pageError}=await supabase.from('creator_pages').select('*').eq('creator_id',user.id).maybeSingle();
+        if(pageError)throw pageError;
+        if(!data)throw new Error('Your saved creator page could not be found. Complete onboarding first.');
+        if(active){setPage(data as PageRecord);setPublished(data.status==='published');}
+      }catch(e){if(active)setError(e instanceof Error?e.message:'Could not load your preview.');}
+      finally{if(active)setLoading(false);}
+    };
+    load();
+    return()=>{active=false;};
+  },[]);
 
-  const handlePublish = () => {
-    publishLandingPage();
-    setShowPublishModal(true);
+  const publicUrl=page?window.location.origin+`/c/${page.handle}`:'';
+  const copy=async()=>{
+    if(!publicUrl)return;
+    try{await navigator.clipboard.writeText(publicUrl);setCopied(true);window.setTimeout(()=>setCopied(false),1800);}catch{setError('Copy failed. Select and copy the link manually.');}
   };
 
-  const handleSaveDraft = () => {
-    saveDraftLandingPage();
-    onNavigate('dashboard');
+  const publish=async()=>{
+    if(!supabase||!page)return;
+    setSaving(true);setError('');
+    try{
+      const {data:{user}}=await supabase.auth.getUser();
+      if(!user)throw new Error('Your session expired. Please log in again.');
+      if(!page.page_data.display_name||!page.handle)throw new Error('Add your public name and handle before publishing.');
+      const {data,error:updateError}=await supabase.from('creator_pages').update({status:'published',published_at:new Date().toISOString()}).eq('creator_id',user.id).select('*').single();
+      if(updateError)throw updateError;
+      setPage(data as PageRecord);setPublished(true);
+    }catch(e){setError(e instanceof Error?e.message:'Could not publish your page.');}
+    finally{setSaving(false);}
   };
 
-  const handleCopyLink = () => {
-    navigator.clipboard.writeText(publicUrl);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const saveDraft=async()=>{
+    if(!supabase||!page)return;
+    setSaving(true);setError('');
+    try{
+      const {data:{user}}=await supabase.auth.getUser();
+      if(!user)throw new Error('Your session expired. Please log in again.');
+      const {error:updateError}=await supabase.from('creator_pages').update({status:'draft',published_at:null}).eq('creator_id',user.id);
+      if(updateError)throw updateError;
+      setPublished(false);onNavigate('dashboard');
+    }catch(e){setError(e instanceof Error?e.message:'Could not save your draft.');}
+    finally{setSaving(false);}
   };
 
-  return (
-    <div className="min-h-screen bg-[#090D16]">
-      {/* Sticky Top Control Toolbar */}
-      <div className="sticky top-0 z-50 bg-[#131926]/95 backdrop-blur-xl border-b border-[#1E293B] px-4 sm:px-6 py-3 shadow-[0_10px_30px_rgba(9,13,22,0.9)]">
-        <div className="max-w-6xl mx-auto flex flex-wrap items-center justify-between gap-3">
-          {/* Left: Back to Onboarding */}
-          <button
-            onClick={() => onNavigate('onboarding')}
-            className="flex items-center gap-1.5 text-xs text-[#94A3B8] hover:text-white px-3 py-1.5 rounded-xl hover:bg-[#1E293B] transition-colors"
-          >
-            <ArrowLeft className="w-3.5 h-3.5" />
-            <span>Edit In Onboarding</span>
-          </button>
+  if(loading)return <main className="flex min-h-screen items-center justify-center bg-[#090A0D] text-xs text-[#A3A4AA]"><LoaderCircle className="mr-3 animate-spin" size={16}/>Loading your page…</main>;
+  if(!page)return <main className="flex min-h-screen items-center justify-center bg-[#090A0D] px-5 text-center"><div><p className="text-sm text-[#FF9B95]">{error||'Page unavailable'}</p><button onClick={()=>onNavigate('onboarding')} className="site-button site-button-primary mt-5">Return to setup</button></div></main>;
 
-          {/* Center: Live URL Preview pill */}
-          <div className="flex items-center gap-2 bg-[#090D16] border border-[#1E293B] rounded-full px-3.5 py-1 text-xs font-mono text-[#94A3B8]">
-            <Globe className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Previewing:</span>
-            <span className="text-white font-semibold">vallu.bio/@{creator.handle}</span>
-            <span className="text-[10px] bg-[#1E293B] text-rose-300 px-1.5 py-0.5 rounded">
-              Draft
-            </span>
-          </div>
-
-          {/* Right: Draft vs Publish Buttons */}
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleSaveDraft}
-              className="px-4 py-1.5 rounded-full border border-[#1E293B] hover:border-slate-500 bg-[#090D16] text-xs font-medium text-[#94A3B8] hover:text-white transition-colors"
-            >
-              Save as Draft
-            </button>
-
-            <button
-              onClick={handlePublish}
-              className="px-5 py-1.5 rounded-full bg-gradient-to-r from-[#E11D48] to-rose-600 hover:from-rose-600 hover:to-rose-500 text-white font-bold text-xs shadow-[0_2px_14px_rgba(225,29,72,0.4)] transition-all flex items-center gap-1.5"
-            >
-              <Share2 className="w-3.5 h-3.5" />
-              <span>Publish Page</span>
-            </button>
-          </div>
+  return <div className="min-h-screen bg-[#090A0D]">
+    <div className="sticky top-0 z-50 border-b border-white/[0.09] bg-[#111216]/95 px-4 py-3 backdrop-blur-2xl sm:px-6">
+      <div className="mx-auto flex max-w-[1200px] flex-wrap items-center justify-between gap-3">
+        <button onClick={()=>onNavigate('onboarding')} className="inline-flex items-center gap-2 text-[10px] text-[#A3A4AA] hover:text-white"><ArrowLeft size={13}/> Edit your details</button>
+        <div className="flex items-center gap-2 rounded-full border border-white/10 px-3 py-2 text-[9px] text-[#A3A4AA]"><Globe size={12} className="text-[#FF963F]"/><span className="hidden sm:inline">YOUR PAGE</span><span className="font-mono text-white">/c/{page.handle}</span><span className={`rounded-full px-2 py-1 ${published?'bg-emerald-400/10 text-emerald-300':'bg-[#FF963F]/10 text-[#FFB36B]'}`}>{published?'LIVE':'DRAFT'}</span></div>
+        <div className="flex items-center gap-2">
+          {published&&<button onClick={copy} className="inline-flex items-center gap-1.5 rounded-full border border-white/10 px-3 py-2 text-[10px] text-[#D0D0D2] hover:bg-white/5">{copied?<Check size={12}/>:<Copy size={12}/>} {copied?'Copied':'Copy link'}</button>}
+          <button onClick={saveDraft} disabled={saving} className="hidden items-center gap-1.5 rounded-full border border-white/10 px-3 py-2 text-[10px] text-[#B1B2B7] hover:bg-white/5 sm:inline-flex"><Save size={12}/> Save draft</button>
+          <button onClick={publish} disabled={saving||published} className="inline-flex items-center gap-1.5 rounded-full bg-[#F0443E] px-4 py-2.5 text-[10px] font-semibold text-white hover:bg-[#FF554D] disabled:opacity-50">{saving?<LoaderCircle size={12} className="animate-spin"/>:<Share2 size={12}/>} {published?'Published':'Publish page'}</button>
         </div>
       </div>
-
-      {/* Render the full combined Landing Template */}
-      <CreatorLandingTemplate creator={creator} isPublic={false} />
-
-      {/* Publish Success Modal */}
-      {showPublishModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-[#131926] border border-[#1E293B] rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl animate-in zoom-in-95 duration-200 text-center">
-            <div className="w-14 h-14 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 flex items-center justify-center mx-auto mb-4">
-              <Check className="w-7 h-7" />
-            </div>
-
-            <h3 className="text-xl font-bold font-display text-white mb-2">
-              Your Public Landing Page is Live!
-            </h3>
-            <p className="text-xs text-[#94A3B8] mb-6 leading-relaxed">
-              Anyone with this link can now view your bespoke creator portfolio, check packages, and submit sponsorship proposals directly into your private dashboard.
-            </p>
-
-            {/* Copyable Share URL Bar */}
-            <div className="bg-[#090D16] border border-[#1E293B] rounded-2xl p-2.5 flex items-center justify-between gap-2 mb-6">
-              <span className="text-xs font-mono text-white truncate pl-2">{publicUrl}</span>
-              <button
-                onClick={handleCopyLink}
-                className="bg-[#1E293B] hover:bg-slate-700 text-white text-xs px-3 py-1.5 rounded-xl transition-colors shrink-0 flex items-center gap-1"
-              >
-                {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                <span>{copied ? 'Copied!' : 'Copy'}</span>
-              </button>
-            </div>
-
-            {/* Actions */}
-            <div className="space-y-2">
-              <button
-                onClick={() => onNavigate('dashboard')}
-                className="w-full py-3 rounded-xl bg-gradient-to-r from-[#E11D48] to-rose-600 hover:from-rose-600 hover:to-rose-500 text-white font-bold text-xs uppercase tracking-wider shadow-md transition-all flex items-center justify-center gap-2"
-              >
-                <LayoutDashboard className="w-4 h-4" />
-                <span>Enter Creator Dashboard</span>
-              </button>
-
-              <button
-                onClick={() => onNavigate('public-landing')}
-                className="w-full py-2.5 rounded-xl bg-[#090D16] hover:bg-[#1E293B] text-xs text-[#94A3B8] hover:text-white transition-colors flex items-center justify-center gap-1.5"
-              >
-                <span>View Public Visitor Page</span>
-                <ExternalLink className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {error&&<p role="alert" className="mx-auto mt-2 max-w-[1200px] text-[10px] text-[#FF9B95]">{error}</p>}
     </div>
-  );
+    <CreatorPortfolioPage pageData={{...page.page_data,visual_style:page.theme?.visual_style||page.page_data.visual_style,writing_tone:page.theme?.writing_tone||page.page_data.writing_tone}} handle={page.handle} preview/>
+    <div className="fixed bottom-4 right-4 z-40"><button onClick={()=>onNavigate('dashboard')} className="flex items-center gap-2 rounded-full border border-white/10 bg-[#17181D] px-4 py-3 text-[10px] text-white shadow-xl hover:border-[#F0443E]/50">Workspace <ExternalLink size={12}/></button></div>
+  </div>;
 };
