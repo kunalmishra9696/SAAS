@@ -1,92 +1,36 @@
 import React, { useEffect, useState } from 'react';
 import { PageRoute } from '../types';
 import { supabase } from '../lib/supabase';
-import { CreatorData } from '../store/creatorStore';
-import { CreatorLandingTemplate } from '../components/CreatorLandingTemplate';
-import { ArrowUpRight, Globe2 } from 'lucide-react';
+import { CreatorPortfolioPage } from '../components/CreatorPortfolioPage';
+import { trackCreatorEvent } from '../lib/analytics';
+import { LoaderCircle, Search, ArrowLeft } from 'lucide-react';
 
-interface PublicLandingViewProps { onNavigate: (route: PageRoute) => void; }
+interface Props { onNavigate:(route:PageRoute)=>void; }
 
-function publicSnapshotToCreator(row: any): CreatorData {
-  const data = row.published_data || {};
-  const platforms = Array.isArray(data.platforms) ? data.platforms.filter((item: any) => item && typeof item === 'object') : [];
-  return {
-    name: typeof data.display_name === 'string' ? data.display_name : '',
-    handle: row.handle,
-    headline: typeof data.headline === 'string' ? data.headline : '',
-    bio: typeof data.bio === 'string' ? data.bio : '',
-    niche: typeof data.niche === 'string' ? data.niche : '',
-    location: typeof data.location === 'string' ? data.location : '',
-    avatarUrl: typeof data.avatar_url === 'string' ? data.avatar_url : '',
-    platforms: platforms.map((item: any) => ({
-      name: typeof item.name === 'string' ? item.name : '',
-      handle: typeof item.handle === 'string' ? item.handle : '',
-      followers: typeof item.followers === 'string' ? item.followers : '',
-      url: typeof item.url === 'string' ? item.url : undefined,
-    })),
-    followersTotal: typeof data.followers_total === 'string' ? data.followers_total : '',
-    avgViews: typeof data.avg_views === 'string' ? data.avg_views : '',
-    monthlyReach: typeof data.monthly_reach === 'string' ? data.monthly_reach : '',
-    startingRate: 0,
-    floorRate: 0,
-    currency: 'INR',
-    paymentTerms: '',
-    wants: [],
-    rejects: [],
-    pastBrands: Array.isArray(data.past_brands) ? data.past_brands.filter((value: unknown) => typeof value === 'string') : [],
-    pastAvgPayout: 0,
-    isPublished: true,
-    publishedAt: row.published_at,
-  };
-}
+export const PublicLandingView:React.FC<Props>=({onNavigate})=>{
+  const [page,setPage]=useState<any>(null);
+  const [loading,setLoading]=useState(true);
+  const [notFound,setNotFound]=useState(false);
 
-export const PublicLandingView: React.FC<PublicLandingViewProps> = ({ onNavigate }) => {
-  const handle = decodeURIComponent(window.location.pathname.split('/')[2] || '').toLowerCase();
-  const [creator, setCreator] = useState<CreatorData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    let active = true;
-    const loadPublishedPage = async () => {
-      if (!supabase || !/^[a-z0-9][a-z0-9_-]{2,29}$/.test(handle)) {
-        if (active) { setError('This creator page is not available.'); setLoading(false); }
-        return;
-      }
-      const { data, error: queryError } = await supabase
-        .from('public_creator_pages')
-        .select('handle,published_data,published_theme,published_at')
-        .eq('handle', handle)
-        .maybeSingle();
-      if (!active) return;
-      if (queryError) setError('We could not load this creator page. Please try again later.');
-      else if (!data) setError('This creator page is not published or the link is incorrect.');
-      else {
-        const pageCreator = publicSnapshotToCreator(data);
-        setCreator(pageCreator);
-        const visitorKey = 'vallu_public_visitor_v1';
-        let visitorId = sessionStorage.getItem(visitorKey);
-        if (!visitorId) {
-          visitorId = crypto.randomUUID();
-          sessionStorage.setItem(visitorKey, visitorId);
-        }
-        void supabase.functions.invoke('track-creator-event', {
-          body: { handle: pageCreator.handle, event: 'page_view', visitorId },
-        }).catch(() => undefined);
-        document.title = pageCreator.name ? `${pageCreator.name} — Creator page` : 'Creator page';
-        const description = pageCreator.headline || pageCreator.bio || 'Creator portfolio and brand collaboration enquiries.';
-        let meta = document.querySelector('meta[name="description"]') as HTMLMetaElement | null;
-        if (!meta) { meta = document.createElement('meta'); meta.name = 'description'; document.head.appendChild(meta); }
-        meta.content = description.slice(0, 155);
-      }
-      setLoading(false);
+  useEffect(()=>{
+    let active=true;
+    const path=window.location.pathname;
+    const raw=path.startsWith('/c/')?path.slice(3):path.startsWith('/@')?path.slice(2):'';
+    const handle=decodeURIComponent(raw.split('/')[0]||'').toLowerCase();
+    const load=async()=>{
+      if(!supabase||!handle){setNotFound(true);setLoading(false);return;}
+      try{
+        const {data,error}=await supabase.from('public_creator_pages').select('handle,published_data,published_theme').eq('handle',handle).maybeSingle();
+        if(error)throw error;
+        if(active){if(data){setPage(data);void trackCreatorEvent(handle,'page_view');}else setNotFound(true);}
+      }catch{if(active)setNotFound(true);}
+      finally{if(active)setLoading(false);}
     };
-    void loadPublishedPage();
-    return () => { active = false; };
-  }, [handle]);
+    load();
+    return()=>{active=false;};
+  },[]);
 
-  if (loading) return <div className="public-page-state"><span className="auth-spinner" /> Loading creator page…</div>;
-  if (error || !creator) return <div className="public-page-state public-page-error"><Globe2 size={23} /><h1>Page not found.</h1><p>{error || 'This creator page is not available.'}</p><button onClick={() => onNavigate('home')}>Explore VALLU <ArrowUpRight size={14} /></button></div>;
-
-  return <CreatorLandingTemplate creator={creator} isPublic onNavigateHome={() => onNavigate('home')} />;
+  if(loading)return <main className="flex min-h-screen items-center justify-center bg-[#090A0D] text-xs text-[#A3A4AA]"><LoaderCircle className="mr-3 animate-spin" size={16}/>Loading creator page…</main>;
+  if(notFound||!page)return <main className="flex min-h-screen items-center justify-center bg-[#090A0D] px-6 text-center text-white"><div><div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-white/5"><Search size={18} className="text-[#F0443E]"/></div><h1 className="mt-5 font-display text-3xl font-semibold">This page isn't available.</h1><p className="mt-2 max-w-sm text-[11px] leading-relaxed text-[#8F9096]">The link may be incorrect, or the creator has not published this page.</p><button onClick={()=>onNavigate('home')} className="site-button site-button-secondary mt-7"><ArrowLeft size={13}/> Back to VALLU</button></div></main>;
+  return <CreatorPortfolioPage pageData={{...page.published_data,visual_style:page.published_theme?.visual_style||page.published_data?.visual_style,writing_tone:page.published_theme?.writing_tone||page.published_data?.writing_tone}} handle={page.handle}/>;
 };
