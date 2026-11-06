@@ -88,7 +88,7 @@ export const CreatorLandingTemplate: React.FC<CreatorLandingTemplateProps> = ({
     setValues((current) => ({ ...current, [key]: value }));
   };
 
-  const trackEvent = async (event: 'inquiry_start' | 'inquiry_complete') => {
+  const trackEvent = async (event: 'page_view' | 'link_click' | 'inquiry_start' | 'inquiry_complete') => {
     if (!supabase || !creator.handle) return;
     try {
       await supabase.functions.invoke('track-creator-event', {
