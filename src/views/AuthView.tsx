@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { PageRoute } from '../types';
-import { ArrowRight, HelpCircle, Eye, EyeOff, ShieldCheck, Check, Sparkles } from 'lucide-react';
+import { ArrowUpRight, Eye, EyeOff, LockKeyhole, Mail, ShieldCheck, Sparkles } from 'lucide-react';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { ensureCreatorProfile } from '../lib/auth';
 
 interface AuthViewProps {
   initialMode?: 'signup' | 'login';
@@ -13,238 +15,136 @@ export const AuthView: React.FC<AuthViewProps> = ({ initialMode = 'signup', onNa
   const [password, setPassword] = useState('');
   const [handle, setHandle] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [showForgotModal, setShowForgotModal] = useState(false);
-  const [forgotEmail, setForgotEmail] = useState('');
-  const [forgotSent, setForgotSent] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [notice, setNotice] = useState('');
 
-  const handleContinue = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    setIsLoading(true);
-
-    // Smooth simulated transition into onboarding
-    setTimeout(() => {
-      setIsLoading(false);
-      onNavigate('onboarding');
-    }, 450);
+  const changeMode = (next: 'signup' | 'login') => {
+    setMode(next);
+    setErrorMessage('');
+    setNotice('');
   };
 
-  const handleForgotSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!forgotEmail) return;
-    setForgotSent(true);
-    setTimeout(() => {
-      setShowForgotModal(false);
-      setForgotSent(false);
-      setForgotEmail('');
-    }, 2000);
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setErrorMessage('');
+    setNotice('');
+
+    if (!isSupabaseConfigured() || !supabase) {
+      setErrorMessage('Account access is not connected yet. Add the Supabase project URL and publishable key to the app environment. Demo sign-in is intentionally disabled.');
+      return;
+    }
+
+    if (mode === 'signup' && !/^[a-z0-9][a-z0-9_-]{2,29}$/.test(handle)) {
+      setErrorMessage('Choose a link handle with 3–30 lowercase letters, numbers, hyphens or underscores.');
+      return;
+    }
+    if (password.length < 8) {
+      setErrorMessage('Use a password with at least 8 characters.');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      if (mode === 'signup') {
+        const { data, error } = await supabase.auth.signUp({
+          email: email.trim().toLowerCase(),
+          password,
+          options: {
+            data: { handle, display_name: handle.replace(/[-_]/g, ' ') },
+            emailRedirectTo: `${window.location.origin}/login`,
+          },
+        });
+        if (error) throw error;
+
+        if (!data.session || !data.user) {
+          setNotice('Your account request is ready. Check your email and confirm your address, then log in to continue.');
+          return;
+        }
+
+        const profile = await ensureCreatorProfile(data.user);
+        onNavigate(profile.onboarding_completed ? 'dashboard' : 'onboarding');
+      } else {
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: email.trim().toLowerCase(),
+          password,
+        });
+        if (error) throw error;
+        if (!data.user) throw new Error('We could not confirm your account. Please try again.');
+
+        const profile = await ensureCreatorProfile(data.user);
+        onNavigate(profile.onboarding_completed ? 'dashboard' : 'onboarding');
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Something went wrong. Please try again.';
+      setErrorMessage(message);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
-    <div className="pt-24 sm:pt-28 pb-20 px-4 sm:px-6 min-h-[85vh] flex items-center justify-center relative overflow-hidden">
-      {/* Background ambient lighting */}
-      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-96 h-96 bg-[#E11D48]/10 rounded-full blur-[120px] pointer-events-none" />
+    <div className="auth-shell">
+      <div className="auth-backdrop auth-backdrop-one" />
+      <div className="auth-backdrop auth-backdrop-two" />
+      <button className="auth-logo" onClick={() => onNavigate('home')} aria-label="Back to home">
+        <span>✳</span> VALLU
+      </button>
 
-      <div className="w-full max-w-md relative z-10">
-        {/* Card Container in Deep Slate #131926 with #1E293B Border */}
-        <div className="bg-[#131926] border border-[#1E293B] rounded-3xl p-6 sm:p-8 shadow-[0_24px_60px_-15px_rgba(9,13,22,0.95)]">
-          {/* Header Branding & Subtitle */}
-          <div className="text-center mb-6">
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#090D16] border border-[#1E293B] text-xs font-mono text-[#94A3B8] mb-3">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#E11D48] animate-pulse" />
-              <span>VALLU CREATOR ACCESS</span>
-            </div>
-            <h1 className="font-display font-black text-2xl sm:text-3xl text-[#F1F5F9] uppercase tracking-tight">
-              {mode === 'signup' ? 'Claim Your Bio Link' : 'Welcome Back'}
-            </h1>
-            <p className="text-xs sm:text-sm text-[#94A3B8] mt-1.5 max-w-xs mx-auto">
-              {mode === 'signup'
-                ? 'Join autonomous creators filtering brand deals with zero commission.'
-                : 'Access your private deal inbox, rate shields, and live bio link.'}
-            </p>
+      <div className="auth-layout">
+        <aside className="auth-story">
+          <span className="auth-kicker"><i /> YOUR WORK. YOUR TERMS.</span>
+          <h1>{mode === 'signup' ? <>Make room for<br /><em>better</em> brand deals.</> : <>Good to have<br />you <em>back.</em></>}</h1>
+          <p>{mode === 'signup' ? 'A home for your work. A smarter start to every collaboration.' : 'Your page, your enquiries and every open decision—right where you left them.'}</p>
+          <div className="auth-story-list">
+            <div><span><ShieldCheck size={15} /></span><b>Your rates remain private</b></div>
+            <div><span><Sparkles size={15} /></span><b>One clear place for enquiries</b></div>
+            <div><span><LockKeyhole size={15} /></span><b>You always make the final call</b></div>
+          </div>
+          <div className="auth-story-foot">A MORE CONSIDERED WAY TO COLLABORATE <span>✳</span></div>
+        </aside>
+
+        <section className="auth-card">
+          <div className="auth-card-top">
+            <span className="auth-card-eyebrow">{mode === 'signup' ? 'GET STARTED' : 'YOUR WORKSPACE'}</span>
+            <span className="auth-step-indicator"><i /> SECURE ACCESS</span>
+          </div>
+          <h2>{mode === 'signup' ? 'Create your account' : 'Welcome back'}</h2>
+          <p className="auth-intro">{mode === 'signup' ? 'Start with the essentials. Build your page after you sign up.' : 'Sign in to continue to your creator workspace.'}</p>
+
+          <div className="auth-switch" role="tablist" aria-label="Account type">
+            <span className={`auth-switch-indicator ${mode === 'login' ? 'switch-login' : ''}`} />
+            <button type="button" role="tab" aria-selected={mode === 'signup'} onClick={() => changeMode('signup')}>Create account</button>
+            <button type="button" role="tab" aria-selected={mode === 'login'} onClick={() => changeMode('login')}>Log in</button>
           </div>
 
-          {/* Smooth Toggle Switch: [ Sign Up | Log In ] */}
-          <div className="p-1 bg-[#090D16] border border-[#1E293B] rounded-2xl flex items-center mb-6 relative">
-            <button
-              type="button"
-              onClick={() => setMode('signup')}
-              className={`flex-1 py-2 rounded-xl text-xs font-semibold transition-all duration-300 relative z-10 flex items-center justify-center gap-1.5 ${
-                mode === 'signup'
-                  ? 'bg-[#E11D48] text-white shadow-[0_2px_12px_rgba(225,29,72,0.4)]'
-                  : 'text-[#94A3B8] hover:text-[#F1F5F9]'
-              }`}
-            >
-              <span>Sign Up</span>
-              {mode === 'signup' && <Sparkles className="w-3 h-3 text-rose-200" />}
+          <form className="auth-form" onSubmit={handleSubmit}>
+            {mode === 'signup' && <label>
+              <span>PUBLIC LINK HANDLE</span>
+              <div className="auth-input-wrap handle-input"><span className="handle-prefix">/c/</span><input value={handle} onChange={(event) => setHandle(event.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 30))} placeholder="yourname" autoComplete="username" required minLength={3} maxLength={30} /></div>
+              <small>3–30 characters · You can refine your page after signup.</small>
+            </label>}
+            <label>
+              <span>EMAIL ADDRESS</span>
+              <div className="auth-input-wrap"><Mail size={15} /><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" required /></div>
+            </label>
+            <label>
+              <span>PASSWORD</span>
+              <div className="auth-input-wrap"><LockKeyhole size={15} /><input type={showPassword ? 'text' : 'password'} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="At least 8 characters" autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} required minLength={8} /><button type="button" className="password-toggle" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? <EyeOff size={15} /> : <Eye size={15} />}</button></div>
+            </label>
+
+            {mode === 'login' && <button type="button" className="auth-forgot" onClick={() => onNavigate('forgot-password')}>Forgot password?</button>}
+            {errorMessage && <div className="auth-feedback auth-error" role="alert">{errorMessage}</div>}
+            {notice && <div className="auth-feedback auth-notice" role="status">{notice}</div>}
+
+            <button type="submit" className="auth-submit" disabled={isLoading}>
+              {isLoading ? <><span className="auth-spinner" /> {mode === 'signup' ? 'Creating account…' : 'Signing in…'}</> : <>{mode === 'signup' ? 'Create account' : 'Log in'} <ArrowUpRight size={16} /></>}
             </button>
-
-            <button
-              type="button"
-              onClick={() => setMode('login')}
-              className={`flex-1 py-2 rounded-xl text-xs font-semibold transition-all duration-300 relative z-10 flex items-center justify-center gap-1.5 ${
-                mode === 'login'
-                  ? 'bg-[#E11D48] text-white shadow-[0_2px_12px_rgba(225,29,72,0.4)]'
-                  : 'text-[#94A3B8] hover:text-[#F1F5F9]'
-              }`}
-            >
-              <span>Log In</span>
-              {mode === 'login' && <Check className="w-3 h-3 text-white" />}
-            </button>
-          </div>
-
-          {/* Form Content with Smooth Transitions */}
-          <form onSubmit={handleContinue} className="space-y-4">
-            {mode === 'signup' && (
-              <div className="space-y-1 animate-in fade-in duration-300">
-                <label className="block text-[11px] font-mono text-[#94A3B8] uppercase tracking-wider">
-                  Reserve Bio Link
-                </label>
-                <div className="flex items-center bg-[#090D16] border border-[#1E293B] rounded-xl px-3 py-2.5 focus-within:border-[#E11D48] transition-colors">
-                  <span className="text-xs font-mono text-[#94A3B8] select-none">vallu.bio/@</span>
-                  <input
-                    type="text"
-                    value={handle}
-                    onChange={(e) => setHandle(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ''))}
-                    placeholder="yourhandle"
-                    required={mode === 'signup'}
-                    className="flex-1 bg-transparent border-none text-xs text-white placeholder-slate-600 focus:outline-none px-1 font-mono"
-                  />
-                  <span className="text-[10px] text-emerald-400 font-mono bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-900/60">
-                    Free
-                  </span>
-                </div>
-              </div>
-            )}
-
-            <div className="space-y-1">
-              <label className="block text-[11px] font-mono text-[#94A3B8] uppercase tracking-wider">
-                Email Address
-              </label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="creator@example.com"
-                required
-                className="w-full bg-[#090D16] border border-[#1E293B] rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-[#E11D48] transition-colors"
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="block text-[11px] font-mono text-[#94A3B8] uppercase tracking-wider">
-                Password
-              </label>
-              <div className="relative">
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••••••"
-                  required
-                  className="w-full bg-[#090D16] border border-[#1E293B] rounded-xl px-3.5 py-2.5 pr-10 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-[#E11D48] transition-colors"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#94A3B8] hover:text-white transition-colors"
-                >
-                  {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                </button>
-              </div>
-            </div>
-
-            {/* Bottom Row as specified: Question button on left, Continue on right */}
-            <div className="pt-4 flex items-center justify-between gap-3 border-t border-[#1E293B]/70 mt-6">
-              {/* Question button on left (Forgot Password) */}
-              <button
-                type="button"
-                onClick={() => setShowForgotModal(true)}
-                className="w-10 h-10 rounded-xl bg-[#090D16] border border-[#1E293B] hover:border-[#E11D48]/50 hover:bg-[#1E293B]/60 text-[#94A3B8] hover:text-white flex items-center justify-center transition-all group"
-                title="Forgot password?"
-                aria-label="Forgot password?"
-              >
-                <HelpCircle className="w-4 h-4 text-[#94A3B8] group-hover:text-[#E11D48] transition-colors" />
-              </button>
-
-              {/* Continue button on right */}
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="flex-1 py-3 px-6 rounded-xl bg-gradient-to-r from-[#E11D48] to-rose-600 hover:from-rose-600 hover:to-rose-500 text-white font-bold text-xs tracking-wider uppercase transition-all shadow-[0_4px_16px_rgba(225,29,72,0.4)] hover:shadow-[0_4px_22px_rgba(225,29,72,0.6)] active:scale-98 flex items-center justify-center gap-2 group"
-              >
-                {isLoading ? (
-                  <>
-                    <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    <span>Processing...</span>
-                  </>
-                ) : (
-                  <>
-                    <span>{mode === 'signup' ? 'Create Account & Continue' : 'Continue to Onboarding'}</span>
-                    <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-                  </>
-                )}
-              </button>
-            </div>
           </form>
-
-          {/* Value Micro-Pill */}
-          <div className="mt-6 pt-4 border-t border-[#1E293B]/60 flex items-center justify-center gap-2 text-[11px] text-[#94A3B8]">
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-            <span>0% Commission · 100% Floor Privacy Guaranteed</span>
-          </div>
-        </div>
+          <div className="auth-legal"><ShieldCheck size={13} /> Your private creator data is protected by account-level access controls.</div>
+          <div className="auth-bottom">{mode === 'signup' ? 'Already have an account?' : 'New to VALLU?'} <button onClick={() => changeMode(mode === 'signup' ? 'login' : 'signup')}>{mode === 'signup' ? 'Log in' : 'Create an account'}</button></div>
+        </section>
       </div>
-
-      {/* Forgot Password Modal */}
-      {showForgotModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-[#131926] border border-[#1E293B] rounded-3xl p-6 sm:p-7 max-w-sm w-full shadow-2xl animate-in zoom-in-95 duration-200">
-            <div className="w-10 h-10 rounded-2xl bg-[#090D16] border border-[#1E293B] flex items-center justify-center text-[#E11D48] mb-3">
-              <HelpCircle className="w-5 h-5" />
-            </div>
-
-            <h3 className="text-base font-bold text-white mb-1">Reset Your Password</h3>
-            <p className="text-xs text-[#94A3B8] mb-4">
-              Enter your account email and we'll send a secure password reset link.
-            </p>
-
-            {forgotSent ? (
-              <div className="bg-emerald-950/30 border border-emerald-900/60 rounded-xl p-3 text-xs text-emerald-300 flex items-center gap-2 mb-4">
-                <Check className="w-4 h-4 text-emerald-400" />
-                <span>Reset link transmitted to your inbox!</span>
-              </div>
-            ) : (
-              <form onSubmit={handleForgotSubmit} className="space-y-3">
-                <input
-                  type="email"
-                  value={forgotEmail}
-                  onChange={(e) => setForgotEmail(e.target.value)}
-                  placeholder="creator@example.com"
-                  required
-                  className="w-full bg-[#090D16] border border-[#1E293B] rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-[#E11D48]"
-                />
-
-                <div className="flex gap-2 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowForgotModal(false)}
-                    className="flex-1 py-2 text-xs text-[#94A3B8] hover:text-white rounded-xl hover:bg-[#1E293B] transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="flex-1 py-2 text-xs font-bold text-white bg-[#E11D48] hover:bg-rose-600 rounded-xl transition-colors shadow-md"
-                  >
-                    Send Link
-                  </button>
-                </div>
-              </form>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 };
