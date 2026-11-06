@@ -1,5 +1,3 @@
-import type { Testimonial } from '../types';
-
 export const FAQ_ITEMS = [
   {
     category: 'The Brand Bot',
