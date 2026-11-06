@@ -15,7 +15,6 @@ import { FAQView } from './views/FAQView';
 import { AboutView } from './views/AboutView';
 import { ContactView } from './views/ContactView';
 import { LegalView } from './views/LegalView';
-import { ForgotPasswordView } from './views/ForgotPasswordView';
 import { NotFoundView } from './views/NotFoundView';
 import { DashboardView } from './views/DashboardView';
 import { AuthView } from './views/AuthView';
@@ -129,7 +128,7 @@ export default function App() {
         {currentRoute === 'contact' && <ContactView onNavigate={handleNavigate}/>}
         {currentRoute === 'legal' && <LegalView onNavigate={handleNavigate}/>}
         {(currentRoute === 'login' || currentRoute === 'signup') && <AuthView initialMode={currentRoute === 'login' ? 'login' : 'signup'} onNavigate={handleNavigate}/>}
-        {currentRoute === 'forgot-password' && <ForgotPasswordView onNavigate={handleNavigate}/>}
+        {currentRoute === 'forgot-password' && <AuthView initialMode='login' onNavigate={handleNavigate}/ >}
         {currentRoute === 'onboarding' && <OnboardingView onNavigate={handleNavigate}/>}
         {currentRoute === 'landing-preview' && <LandingPreviewView onNavigate={handleNavigate}/>}
         {(currentRoute === 'public-landing' || currentRoute === 'public-bio') && <PublicLandingView onNavigate={handleNavigate}/>}
