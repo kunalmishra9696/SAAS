@@ -1,23 +1,12 @@
 import { createClient, SupabaseClient, User } from '@supabase/supabase-js';
 
-// Supabase Environment or Cached Custom Config
+// Only the Supabase URL and publishable key belong in a browser application.
+// Environment values override these defaults so staging/production can use separate projects.
 const getSupabaseConfig = () => {
-  const envUrl = import.meta.env.VITE_SUPABASE_URL;
-  const envKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-  const localUrl = localStorage.getItem('vallu_supabase_url');
-  const localKey = localStorage.getItem('vallu_supabase_anon_key');
+  const url = import.meta.env.VITE_SUPABASE_URL || 'https://cecmtolherzfjtsyrhii.supabase.co';
+  const key = import.meta.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_WbN9FWEHocKe11QUj8gOxw_qg4cNwnO';
 
-  const url = localUrl || envUrl || '';
-  const key = localKey || envKey || '';
-
-  const isConfigured = Boolean(
-    url &&
-    key &&
-    url !== 'https://your-project-id.supabase.co' &&
-    key !== 'your-anon-public-key' &&
-    url.startsWith('https://')
-  );
-
+  const isConfigured = Boolean(url && key && url.startsWith('https://') && key.length > 20);
   return { url, key, isConfigured };
 };
 
