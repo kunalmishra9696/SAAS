@@ -120,6 +120,7 @@ function toPageData(data: CreatorData) {
   return {
     display_name: data.name.trim(),
     handle: data.handle.trim().toLowerCase(),
+    niche: data.niche.trim(),
     headline: data.headline.trim(),
     bio: data.bio.trim(),
     location: data.location.trim(),
