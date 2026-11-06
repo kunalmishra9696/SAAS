@@ -47,9 +47,16 @@ export const LandingPreviewView:React.FC<Props>=({onNavigate})=>{
       const {data:{user}}=await supabase.auth.getUser();
       if(!user)throw new Error('Your session expired. Please log in again.');
       if(!page.page_data.display_name||!page.handle)throw new Error('Add your public name and handle before publishing.');
-      const {data,error:updateError}=await supabase.from('creator_pages').update({status:'published',published_at:new Date().toISOString(),published_data:page.page_data,published_theme:page.theme}).eq('creator_id',user.id).select('*').single();
-      if(updateError)throw updateError;
-      setPage(data as PageRecord);setPublished(true);
+      const {error:publishError}=await supabase.rpc('publish_creator_page');
+      if(publishError)throw publishError;
+      setPage(current=>current?{
+        ...current,
+        status:'published',
+        published_at:new Date().toISOString(),
+        published_data:current.page_data,
+        published_theme:current.theme,
+      }:current);
+      setPublished(true);
     }catch(e){setError(e instanceof Error?e.message:'Could not publish your page.');}
     finally{setSaving(false);}
   };
