@@ -1,68 +1,95 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { PageRoute } from '../types';
-import { useCreatorStore } from '../store/creatorStore';
-import { CreatorLandingTemplate } from '../components/CreatorLandingTemplate';
-import { ArrowLeft, ArrowUpRight, Check, Copy, ExternalLink, Globe, LayoutDashboard, Share2 } from 'lucide-react';
+import { supabase } from '../lib/supabase';
+import { CreatorPortfolioPage } from '../components/CreatorPortfolioPage';
+import { ArrowLeft, Check, Copy, ExternalLink, Globe, LoaderCircle, Save, Share2 } from 'lucide-react';
 
-interface LandingPreviewViewProps { onNavigate: (route: PageRoute) => void; }
+interface Props { onNavigate:(route:PageRoute)=>void; }
+type PageRecord={id:string;creator_id:string;handle:string;status:string;page_data:Record<string,any>;theme:Record<string,any>;published_data:Record<string,any>|null;published_theme:Record<string,any>|null};
 
-export const LandingPreviewView: React.FC<LandingPreviewViewProps> = ({ onNavigate }) => {
-  const { creator, publishLandingPage, saveDraftLandingPage, isLoading, error: storeError } = useCreatorStore();
-  const [showPublishModal, setShowPublishModal] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
-  const publicUrl = `${window.location.origin}/c/${creator.handle}`;
+export const LandingPreviewView:React.FC<Props>=({onNavigate})=>{
+  const [page,setPage]=useState<PageRecord|null>(null);
+  const [loading,setLoading]=useState(true);
+  const [saving,setSaving]=useState(false);
+  const [error,setError]=useState('');
+  const [copied,setCopied]=useState(false);
+  const [published,setPublished]=useState(false);
 
-  const handlePublish = async () => {
-    setSaving(true); setError('');
-    try {
-      await publishLandingPage();
-      setShowPublishModal(true);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Your page could not be published.');
-    } finally { setSaving(false); }
+  useEffect(()=>{
+    let active=true;
+    const load=async()=>{
+      if(!supabase){setError('Supabase is not configured.');setLoading(false);return;}
+      try{
+        const {data:{user},error:authError}=await supabase.auth.getUser();
+        if(authError)throw authError;
+        if(!user)throw new Error('Please log in to preview your page.');
+        const {data,error:pageError}=await supabase.from('creator_pages').select('*').eq('creator_id',user.id).maybeSingle();
+        if(pageError)throw pageError;
+        if(!data)throw new Error('Your saved creator page could not be found. Complete onboarding first.');
+        if(active){const record=data as PageRecord;const hasLiveVersion=record.status==='published'&&Boolean(record.published_data);const unchanged=hasLiveVersion&&JSON.stringify(record.page_data)===JSON.stringify(record.published_data)&&JSON.stringify(record.theme)===JSON.stringify(record.published_theme);setPage(record);setPublished(Boolean(unchanged));}
+      }catch(e){if(active)setError(e instanceof Error?e.message:'Could not load your preview.');}
+      finally{if(active)setLoading(false);}
+    };
+    load();
+    return()=>{active=false;};
+  },[]);
+
+  const publicUrl=page?window.location.origin+`/c/${page.handle}`:'';
+  const copy=async()=>{
+    if(!publicUrl)return;
+    try{await navigator.clipboard.writeText(publicUrl);setCopied(true);window.setTimeout(()=>setCopied(false),1800);}catch{setError('Copy failed. Select and copy the link manually.');}
   };
 
-  const handleSaveDraft = async () => {
-    setSaving(true); setError('');
-    try {
-      await saveDraftLandingPage();
+  const publish=async()=>{
+    if(!supabase||!page)return;
+    setSaving(true);setError('');
+    try{
+      const {data:{user}}=await supabase.auth.getUser();
+      if(!user)throw new Error('Your session expired. Please log in again.');
+      if(!page.page_data.display_name||!page.handle)throw new Error('Add your public name and handle before publishing.');
+      const {error:publishError}=await supabase.rpc('publish_creator_page');
+      if(publishError)throw publishError;
+      setPage(current=>current?{
+        ...current,
+        status:'published',
+        published_at:new Date().toISOString(),
+        published_data:current.page_data,
+        published_theme:current.theme,
+      }:current);
+      setPublished(true);
+    }catch(e){setError(e instanceof Error?e.message:'Could not publish your page.');}
+    finally{setSaving(false);}
+  };
+
+  const saveDraft=async()=>{
+    if(!supabase||!page)return;
+    setSaving(true);setError('');
+    try{
+      const {data:{user}}=await supabase.auth.getUser();
+      if(!user)throw new Error('Your session expired. Please log in again.');
+      // The current page_data is already saved as the draft. Keep the last published snapshot live.
       onNavigate('dashboard');
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Your draft could not be saved.');
-    } finally { setSaving(false); }
+    }catch(e){setError(e instanceof Error?e.message:'Could not save your draft.');}
+    finally{setSaving(false);}
   };
 
-  const handleCopyLink = async () => {
-    try {
-      await navigator.clipboard.writeText(publicUrl);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1800);
-    } catch {
-      setError('Your browser blocked copying. You can copy the page link from the address field.');
-    }
-  };
+  if(loading)return <main className="flex min-h-screen items-center justify-center bg-[#090A0D] text-xs text-[#A3A4AA]"><LoaderCircle className="mr-3 animate-spin" size={16}/>Loading your page…</main>;
+  if(!page)return <main className="flex min-h-screen items-center justify-center bg-[#090A0D] px-5 text-center"><div><p className="text-sm text-[#FF9B95]">{error||'Page unavailable'}</p><button onClick={()=>onNavigate('onboarding')} className="site-button site-button-primary mt-5">Return to setup</button></div></main>;
 
-  if (isLoading) return <div className="preview-loading"><span className="auth-spinner" /> Loading your page preview…</div>;
-
-  return <div className="preview-shell">
-    <div className="preview-toolbar">
-      <button onClick={() => onNavigate('onboarding')}><ArrowLeft size={14} /> Edit details</button>
-      <div className="preview-url"><Globe size={13} /><span>PREVIEW</span><b>/c/{creator.handle || 'your-handle'}</b><i>PRIVATE</i></div>
-      <div className="preview-actions"><button className="preview-save" onClick={() => void handleSaveDraft()} disabled={saving}>Save draft</button><button className="preview-publish" onClick={() => void handlePublish()} disabled={saving || !creator.name || !creator.handle}>{saving ? 'Saving…' : 'Publish page'} <Share2 size={13} /></button></div>
+  return <div className="min-h-screen bg-[#090A0D]">
+    <div className="sticky top-0 z-50 border-b border-white/[0.09] bg-[#111216]/95 px-4 py-3 backdrop-blur-2xl sm:px-6">
+      <div className="mx-auto flex max-w-[1200px] flex-wrap items-center justify-between gap-3">
+        <button onClick={()=>onNavigate('onboarding')} className="inline-flex items-center gap-2 text-[10px] text-[#A3A4AA] hover:text-white"><ArrowLeft size={13}/> Edit your details</button>
+        <div className="flex items-center gap-2 rounded-full border border-white/10 px-3 py-2 text-[9px] text-[#A3A4AA]"><Globe size={12} className="text-[#FF963F]"/><span className="hidden sm:inline">YOUR PAGE</span><span className="font-mono text-white">/c/{page.handle}</span><span className={`rounded-full px-2 py-1 ${page.status==='published'&&page.published_data?'bg-emerald-400/10 text-emerald-300':'bg-[#FF963F]/10 text-[#FFB36B]'}`}>{published?'LIVE':page.status==='published'&&page.published_data?'DRAFT CHANGES':'DRAFT'}</span></div>
+        <div className="flex items-center gap-2">
+          {page.status==='published'&&page.published_data&&<button onClick={copy} className="inline-flex items-center gap-1.5 rounded-full border border-white/10 px-3 py-2 text-[10px] text-[#D0D0D2] hover:bg-white/5">{copied?<Check size={12}/>:<Copy size={12}/>} {copied?'Copied':'Copy link'}</button>}
+          <button onClick={saveDraft} disabled={saving} className="hidden items-center gap-1.5 rounded-full border border-white/10 px-3 py-2 text-[10px] text-[#B1B2B7] hover:bg-white/5 sm:inline-flex"><Save size={12}/> Save draft</button>
+          <button onClick={publish} disabled={saving||published} className="inline-flex items-center gap-1.5 rounded-full bg-[#F0443E] px-4 py-2.5 text-[10px] font-semibold text-white hover:bg-[#FF554D] disabled:opacity-50">{saving?<LoaderCircle size={12} className="animate-spin"/>:<Share2 size={12}/>} {published?'Published':page.status==='published'&&page.published_data?'Publish changes':'Publish page'}</button>
+        </div>
+      </div>
+      {error&&<p role="alert" className="mx-auto mt-2 max-w-[1200px] text-[10px] text-[#FF9B95]">{error}</p>}
     </div>
-    {(error || storeError) && <div className="preview-error">{error || storeError}</div>}
-    <CreatorLandingTemplate creator={creator} isPublic={false} />
-    {showPublishModal && <div className="preview-modal-backdrop">
-      <section className="preview-modal" role="dialog" aria-modal="true" aria-labelledby="publish-heading">
-        <div className="preview-success-icon"><Check size={23} /></div>
-        <span className="preview-modal-eyebrow">PUBLISHED SUCCESSFULLY</span>
-        <h2 id="publish-heading">Your page is live.</h2>
-        <p>Anyone with this link can view your published creator page and send a collaboration enquiry. Your workspace stays private.</p>
-        <div className="preview-share-link"><span>{publicUrl}</span><button onClick={() => void handleCopyLink()}><Copy size={13} />{copied ? 'Copied' : 'Copy'}</button></div>
-        <div className="preview-modal-actions"><button onClick={() => onNavigate('dashboard')}><LayoutDashboard size={14} /> Open workspace</button><button onClick={() => window.location.assign(publicUrl)}>View public page <ExternalLink size={13} /></button></div>
-      </section>
-    </div>}
+    <CreatorPortfolioPage pageData={{...page.page_data,visual_style:page.theme?.visual_style||page.page_data.visual_style,writing_tone:page.theme?.writing_tone||page.page_data.writing_tone}} handle={page.handle} preview/>
+    <div className="fixed bottom-4 right-4 z-40"><button onClick={()=>onNavigate('dashboard')} className="flex items-center gap-2 rounded-full border border-white/10 bg-[#17181D] px-4 py-3 text-[10px] text-white shadow-xl hover:border-[#F0443E]/50">Workspace <ExternalLink size={12}/></button></div>
   </div>;
 };
