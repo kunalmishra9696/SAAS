@@ -264,6 +264,7 @@ export function useCreatorStore() {
   const [creator, setCreator] = useState<CreatorData>(EMPTY_CREATOR_DATA);
   const [deals, setDeals] = useState<InboundDeal[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [onboardingStep, setOnboardingStep] = useState(0);
   const [error, setError] = useState('');
 
   const refresh = useCallback(async () => {
@@ -273,6 +274,7 @@ export function useCreatorStore() {
       const workspace = await loadCreatorWorkspace();
       setCreator(workspace.creator);
       setDeals(workspace.deals);
+      setOnboardingStep(num(workspace.profile?.onboarding_step));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not load your creator workspace.');
       throw cause;
@@ -287,6 +289,7 @@ export function useCreatorStore() {
       if (!active) return;
       setCreator(workspace.creator);
       setDeals(workspace.deals);
+      setOnboardingStep(num(workspace.profile?.onboarding_step));
     }).catch((cause) => {
       if (active) setError(cause instanceof Error ? cause.message : 'Could not load your creator workspace.');
     }).finally(() => {
@@ -312,8 +315,10 @@ export function useCreatorStore() {
     const next = { ...creator, ...updates };
     setCreator(next);
     await saveWorkspaceData(next);
-    const { error } = await supabase!.from('creator_profiles').update({ onboarding_step: Math.min(9, Math.max(0, step)) }).eq('id', userId);
+    const nextStep = Math.min(9, Math.max(0, step));
+    const { error } = await supabase!.from('creator_profiles').update({ onboarding_step: nextStep }).eq('id', userId);
     if (error) throw error;
+    setOnboardingStep(nextStep);
   }, [creator]);
 
   const completeOnboarding = useCallback(async (updates: Partial<CreatorData>) => {
@@ -325,6 +330,7 @@ export function useCreatorStore() {
       onboarding_completed: true,
     }).eq('id', userId);
     if (error) throw error;
+    setOnboardingStep(9);
     setCreator(next);
   }, [creator]);
 
@@ -379,7 +385,7 @@ export function useCreatorStore() {
   }, [refresh]);
 
   return {
-    creator, deals, isLoading, error, refresh,
+    creator, deals, isLoading, onboardingStep, error, refresh,
     updateCreator, saveStep, completeOnboarding,
     publishLandingPage, saveDraftLandingPage, updateDealStatus,
   };
