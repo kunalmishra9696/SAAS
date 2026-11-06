@@ -1,23 +1,19 @@
 import { createClient, SupabaseClient, User } from '@supabase/supabase-js';
 
-// Supabase Environment or Cached Custom Config
+// Public client configuration. Never place a service-role/secret key in a VITE_ variable.
 const getSupabaseConfig = () => {
-  const envUrl = import.meta.env.VITE_SUPABASE_URL;
-  const envKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-  const localUrl = localStorage.getItem('vallu_supabase_url');
-  const localKey = localStorage.getItem('vallu_supabase_anon_key');
-
-  const url = localUrl || envUrl || '';
-  const key = localKey || envKey || '';
-
+  const url = (import.meta.env.VITE_SUPABASE_URL || '').trim();
+  const key = (
+    import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
+    import.meta.env.VITE_SUPABASE_ANON_KEY ||
+    ''
+  ).trim();
   const isConfigured = Boolean(
-    url &&
+    url.startsWith('https://') &&
     key &&
-    url !== 'https://your-project-id.supabase.co' &&
-    key !== 'your-anon-public-key' &&
-    url.startsWith('https://')
+    !url.includes('your-project-id') &&
+    !key.includes('your-')
   );
-
   return { url, key, isConfigured };
 };
 
@@ -40,18 +36,6 @@ export const isSupabaseLive = (): boolean => {
 
 export const isSupabaseConfigured = (): boolean => {
   return isSupabaseLive();
-};
-
-export const saveSupabaseCredentials = (url: string, key: string) => {
-  localStorage.setItem('vallu_supabase_url', url.trim());
-  localStorage.setItem('vallu_supabase_anon_key', key.trim());
-  window.location.reload();
-};
-
-export const clearSupabaseCredentials = () => {
-  localStorage.removeItem('vallu_supabase_url');
-  localStorage.removeItem('vallu_supabase_anon_key');
-  window.location.reload();
 };
 
 // Database TypeScript Types
