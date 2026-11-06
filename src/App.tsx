@@ -128,7 +128,7 @@ export default function App() {
         {currentRoute === 'contact' && <ContactView onNavigate={handleNavigate}/>}
         {currentRoute === 'legal' && <LegalView onNavigate={handleNavigate}/>}
         {(currentRoute === 'login' || currentRoute === 'signup') && <AuthView initialMode={currentRoute === 'login' ? 'login' : 'signup'} onNavigate={handleNavigate}/>}
-        {currentRoute === 'forgot-password' && <AuthView initialMode='login' onNavigate={handleNavigate}/ >}
+        {currentRoute === 'forgot-password' && <AuthView initialMode='login' onNavigate={handleNavigate}/>}
         {currentRoute === 'onboarding' && <OnboardingView onNavigate={handleNavigate}/>}
         {currentRoute === 'landing-preview' && <LandingPreviewView onNavigate={handleNavigate}/>}
         {(currentRoute === 'public-landing' || currentRoute === 'public-bio') && <PublicLandingView onNavigate={handleNavigate}/>}
