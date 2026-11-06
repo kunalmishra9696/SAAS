@@ -150,7 +150,9 @@ export const OnboardingView: React.FC<Props> = ({onNavigate}) => {
       if(cleanHandle.length<3||cleanHandle.length>30||!/^[a-z0-9][a-z0-9_-]+$/.test(cleanHandle))throw new Error('Your public handle must be 3–30 characters and use letters, numbers, - or _.');
       if(!draft.displayName.trim())throw new Error('Please add your name.');
       if(!draft.niche.trim())throw new Error('Please add your creator category.');
-      if(draft.targetRate&&draft.minimumRate&&Number(draft.minimumRate)>Number(draft.targetRate))throw new Error('Your minimum rate cannot be higher than your target rate.');
+      if(!draft.targetRate||!Number.isFinite(Number(draft.targetRate))||Number(draft.targetRate)<=0)throw new Error('Add your target rate so the assistant has a real reference point.');
+      if(draft.minimumRate===''||!Number.isFinite(Number(draft.minimumRate))||Number(draft.minimumRate)<0)throw new Error('Set your private minimum rate. Enter 0 if you are not setting a hard floor yet.');
+      if(Number(draft.minimumRate)>Number(draft.targetRate))throw new Error('Your minimum rate cannot be higher than your target rate.');
 
       const profileUpdate:Record<string,unknown>={
         display_name:draft.displayName.trim(),
@@ -269,7 +271,7 @@ export const OnboardingView: React.FC<Props> = ({onNavigate}) => {
             </>}
             {step===5&&<>
               <div className="grid gap-4 sm:grid-cols-2"><Label title="Currency"><select className={`${inputClass} mt-2`} value={draft.currency} onChange={e=>update('currency',e.target.value)}><option value="INR">INR · Indian rupee</option><option value="USD">USD · US dollar</option></select></Label><Label title="Target rate" hint="Your preferred fee for the typical collaboration you have in mind."><TextInput type="number" value={draft.targetRate} onChange={v=>update('targetRate',v)} placeholder="e.g. 25000"/></Label></div>
-              <Label title="Minimum acceptable rate" hint="Private. Never shown to brands. Used to enforce your own rules."><TextInput type="number" value={draft.minimumRate} onChange={v=>update('minimumRate',v)} placeholder="e.g. 15000"/></Label>
+              <Label title="Minimum acceptable rate" hint="Private. Never shown to brands. Enter 0 if you are not setting a hard floor yet."><TextInput type="number" value={draft.minimumRate} onChange={v=>update('minimumRate',v)} placeholder="e.g. 15000"/></Label>
               <Label title="Public starting rate (optional)" hint="Only shown if you choose to provide it. This is not your private minimum."><TextInput type="number" value={draft.publicStartingRate} onChange={v=>update('publicStartingRate',v)} placeholder="Leave blank to keep pricing private"/></Label>
               <p className="rounded-xl border border-[#F0443E]/20 bg-[#F0443E]/[0.06] p-3 text-[9px] leading-relaxed text-[#D0AAA7]"><LockKeyhole size={11} className="mr-1 inline"/> Your target and minimum remain private. The assistant will never disclose your minimum to a brand.</p>
             </>}
